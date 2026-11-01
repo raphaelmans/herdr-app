@@ -1,0 +1,10 @@
+*
+!.gitignore
+!keys.json
+!settings.json
+!mods/
+mods/*
+!mods/tmux-prefix/
+mods/tmux-prefix/*
+!mods/tmux-prefix/main.js
+!mods/tmux-prefix/mod.json
