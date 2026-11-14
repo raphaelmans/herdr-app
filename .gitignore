@@ -1,10 +1,29 @@
+# Allowlist: Herdr rewrites most of this folder itself (AGENTS.md, *.d.ts,
+# frame/, icons/, shipped layouts and mods, state files). Track only what's ours.
 *
 !.gitignore
+!README.md
 !keys.json
 !settings.json
+!programs.json
+
+!layouts/
+layouts/*
+!layouts/main-copy.json
+
 !mods/
 mods/*
 !mods/tmux-prefix/
-mods/tmux-prefix/*
-!mods/tmux-prefix/main.js
-!mods/tmux-prefix/mod.json
+!mods/copy-mode/
+!mods/herdr-nvim/
+!mods/herdr-nvim/bin/
+!mods/herdr-nvim-header/
+!mods/*/*.js
+!mods/*/mod.json
+!mods/*/*.svg
+!mods/herdr-nvim/bin/*
+
+# Written by the app / editor tooling
+*.d.ts
+jsconfig.json
+*.error

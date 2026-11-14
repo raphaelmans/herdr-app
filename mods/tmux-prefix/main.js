@@ -1,6 +1,6 @@
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { agents, closeOverlay, focused, hc, nextCommand, openOverlay, props, run, theme } from "herdr";
+import { agents, closeOverlay, focused, hc, nextCommand, notify, openOverlay, panes, props, run, theme } from "herdr";
 
 // Edit these two things to make the example yours. Only repeatable actions
 // start a timer: the first key after Ctrl+A can take as long as you like.
@@ -27,6 +27,8 @@ const BINDINGS = [
   ["J", "Next space", "space.next", {}, true],
   ["K", "Previous space", "space.prev", {}, true],
   ["z", "Zoom pane", "pane.zoom"],
+  ["[", "Copy mode", "copy-mode"],
+  ["y", "Copy pane title", "copy-title"],
   ["N", "New space", "space.new"],
   ["W", "Rename space", "space.rename"],
   ["D", "Close space", "space.close"],
@@ -34,14 +36,31 @@ const BINDINGS = [
   ["w", "Picker", "mod.open", { name: "picker" }],
   ["g", "Go to", "mod.open", { name: "picker" }],
   ["b", "Toggle sidebar", "layout.toggle", { id: "sidebar" }],
+  ["e", "Toggle Neovim", "mod.open", { name: "herdr-nvim" }],
   ["s", "Settings", "app.settings"],
   ["q", "Minimize window", "window.minimize"],
   ["?", "Help", "app.help"],
   ...Array.from({ length: 10 }, (_, i) => [String(i), `Tab ${i === 0 ? 10 : i}`, "tab.select", { index: i === 0 ? 10 : i }]),
 ];
 
-// The worktree dialog is a mod, not a command: open it the way the + menu does.
-function act(command, args) {
+// The worktree dialog and copy mode are mods, not commands: open them as overlays.
+// Leading status glyphs agents put in titles: spinners (braille), ✳, ●, emoji.
+const TITLE_NOISE = /^[\u2800-\u28FF\u2700-\u27BF\u2600-\u26FF\u25A0-\u25FF\u2022\u00B7*\p{Extended_Pictographic}\uFE0F\s]+/u;
+
+function act(command, args, cx) {
+  if (command === "copy-title") {
+    const pane = focused()?.pane;
+    const title = (panes().find((p) => p.pane === pane)?.title ?? "").replace(TITLE_NOISE, "").trim();
+    if (!title) return notify({ title: "This pane has no title", level: "warning", timeout: 1500 });
+    cx.write_to_clipboard(title);
+    notify({ title: "Copied pane title", body: title, level: "success", timeout: 1500 });
+    return;
+  }
+  if (command === "copy-mode") {
+    const terminal = focused()?.terminal;
+    if (terminal) openOverlay({ mod: "copy-mode", kind: "window", width: 0.92, height: 0.88, props: { terminal } });
+    return;
+  }
   if (command !== "worktree") return run(command, args);
   const f = focused();
   if (f) openOverlay({ mod: "worktree", kind: "dialog", width: 460, height: 280, props: { space: f.space, folder: f.cwd, action: "new" } });
@@ -112,7 +131,7 @@ export default class TmuxPrefix extends View {
     }
     const [, , command, args = {}, repeatable = false] = binding;
     if (!repeatable) this.dismiss();
-    act(command, args);
+    act(command, args, cx);
     if (repeatable) {
       this.repeat = true;
       const generation = ++this.generation;
