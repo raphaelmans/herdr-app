@@ -12,10 +12,13 @@
 // feature does). One whose mods are all off is passed over.
 //
 // The Programs rows come from ../../health.sh --json, the same check a shell
-// runs without Herdr. What a requirement is lives in ./requirements.json; which
-// mod needs it lives in that mod's mod.json "spec" (see health.sh). Owners and
-// install commands follow the toolchain standard (~/toolchain) when it is here. To add a
-// requirement: describe it in requirements.json and name it in the mod's spec.
+// runs without Herdr. That script puts mise's shims on PATH first: this exec
+// does not see a login shell's PATH, so without them a mise-owned requirement
+// looks missing or off its route. What a requirement is lives in
+// ./requirements.json; which mod needs it lives in that mod's mod.json "spec"
+// (see health.sh). Owners and install commands follow the toolchain standard
+// (~/toolchain) when it is here. To add a requirement: describe it in
+// requirements.json and name it in the mod's spec.
 //
 // The tab-bar button's copy runs survey() as Herdr starts: it keeps
 //   shared "health": { missing: [names], extra: [names], route: [names] }

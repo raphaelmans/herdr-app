@@ -35,6 +35,16 @@ case "${1:-}" in
   *) sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac
 
+# Herdr's exec PATH is the short one the app was launched with, not a login
+# shell. mise's shims are what that shell searches first. Without them a tool
+# only mise installed looks missing, and a Homebrew or system copy of one mise
+# owns is reported off its route. This script and the Health page must agree.
+mise_shims=${MISE_DATA_DIR:-$HOME/.local/share/mise}/shims
+if [ -d "$mise_shims" ]; then
+  PATH="$mise_shims:$PATH"
+  export PATH
+fi
+
 command -v jq >/dev/null 2>&1 || { echo "health.sh: jq is not here, and it reads the mod specs. Get it with: mise use --global jq@1 (or brew install jq)" >&2; exit 2; }
 [ -r "$catalog" ] || { echo "health.sh: $catalog is not there" >&2; exit 2; }
 

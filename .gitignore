@@ -8,6 +8,9 @@
 !settings.json
 !launcher.json
 !health.sh
+!hooks/
+hooks/*
+!hooks/herdr-app-status.sh
 !DEFAULTS.md
 !CLAUDE.md
 !docs/
@@ -57,6 +60,7 @@ mods/*
 !mods/file-picker/
 !mods/md-popup/
 !mods/lazygit/
+!mods/prs/
 !mods/*/*.js
 !mods/*/mod.json
 !mods/config/vendored.json

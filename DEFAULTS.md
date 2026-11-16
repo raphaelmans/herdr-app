@@ -6,7 +6,7 @@ Reset only the part you were asked about. Nothing here deletes spaces, tabs, ter
 
 ## 1. Files that git holds
 
-`keys.json`, `settings.json`, `launcher.json`, `layouts/mine.json`, every tracked mod under `mods/`, `health.sh`.
+`keys.json`, `settings.json`, `launcher.json`, `layouts/mine.json`, every tracked mod under `mods/`, `health.sh`, `hooks/herdr-app-status.sh`.
 
 Their default is the committed version:
 

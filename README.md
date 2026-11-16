@@ -21,7 +21,7 @@ Herdr rewrites most of this folder on every start, so `.gitignore` is an allowli
 | `mods/stayawake/` | The coffee-cup tab-bar button: keeps the Mac awake, right-click for lid-closed too |
 | `mods/skillshare/` | The Skillshare panel and its tab-bar button (vendored) |
 | `mods/tmux-prefix/` | `ctrl-a` prefix popup with keys that match the Herdr TUI |
-| `mods/launcher/`, `launcher.json` | `ctrl-a c` / `v` / `-` / `N`: new tab, split or space with a shell or any installed agent, optional skip-permissions flag, a model from the model catalog (`d`), reasoning level (`r`, or `ctrl-r` while typing) for Claude Code and Codex, and worktrunk worktree; choices saved in `launcher.json` |
+| `mods/launcher/`, `launcher.json` | `ctrl-a c` / `v` / `-` / `N`: new tab, split or space with a shell or any installed agent, optional skip-permissions flag, a model from the model catalog (`d`), reasoning level (`r`, or `ctrl-r` while typing) for Claude Code and Codex, a first message (`m`), and worktrunk worktree; choices saved in `launcher.json`. Copilot's first message follows `-i`, because a bare argument is a subcommand |
 | `mods/copy-mode/` | tmux-style copy mode (`ctrl-a [`), vi keys over the terminal's scrollback |
 | `mods/nvim-pane/` | Neovim in a pane beside the terminal: `cmd-e` / `ctrl-a e` shows or hides it, `cmd-shift-e` shows it and gives it the keyboard |
 | `mods/pane-header/` | The layout's pane header; also records where each pane sits, for `send-box` |
@@ -33,7 +33,8 @@ Herdr rewrites most of this folder on every start, so `.gitignore` is an allowli
 | `mods/viz/` | `cmd-shift-a` opens the artifacts, `cmd-alt-a` annotates the one shown. Artifacts that agents publish beside their terminal, with the `herdr-viz` script in this folder: link it once with `ln -sf ~/.config/herdr-app/mods/viz/herdr-viz ~/.local/bin/herdr-viz` |
 | `mods/config/` | `cmd-shift-m` / `ctrl-a M` / the tab-bar button: one dialog for every choice my mods read. Pages: Agents (which installed agents are offered), Writer (who writes commit summaries and branch names), Models (the model catalog: the newest publicly available model of each family, synced from models.dev once a day, and the models you star to list first into `models.json`, offered by the Launcher and the Writer), Worktrunk (worktrunk's own `~/.config/worktrunk/config.toml`: its commit writer, which can follow the Writer, where worktrees go, what `wt merge`, `wt remove` and `wt list` do), Mods (what each is wired to, and a switch that turns one off by moving it to `mods-disabled/`), Curtain (what the curtain takes off the window while it is drawn), Vaults (the Obsidian vaults added here with `a`, and the connected vault; `ctrl-a o` opens it in Obsidian, `ctrl-a Y` copies its path, `ctrl-a O` opens this page), Health (every requirement: the programs my mods run, such as `hc`, `git`, `nvim`, `wt`, `jq` and `lific`, found or missing with the way to get each; it also runs as Herdr starts and marks the tab-bar button when a needed one is missing). Terms: `GLOSSARY.md` |
 | `mods/lific/` | `ctrl-a L`: the [lific](https://github.com/raphaelmans/lific) issues and pages (`tab`) of every project, read and edited in place: scroll, search, edit text, comment, rename, set status and priority, add issues or pages, hand one to the pane you came from. Needs `~/.local/bin/lific` (the fork's build) |
-| `mods-disabled/jira/` | `ctrl-a B`: a Jira project's board, read only: issues as cards in the board's columns, opening on the active sprint and the issues assigned to the signed-in account (`a` shows everyone's; `s` opens a combobox of the sprints (active, coming, closed), the backlog as one ranked list, and all issues, with `/` to filter it), the selected issue beside it, hand one to the pane you came from, or `b` for its branch `<KEY>-<title words>`: create it (`git switch -c` in the repo of the pane you came from) or copy the name. Off by default: turn it on in Config → Mods. Its issues come from a source; for now only `stub.js`, made-up data |
+| `mods/prs/` | `ctrl-a P`: pull requests for a repository in a selected organization, read with `gh` on this computer. The account's organizations are along the top; `1-9`, `[` and `]` choose one; the repositories are on the left and `l` steps into that repository's pull requests. Its own spec needs `gh`. The Git dialog and lazygit do not |
+| `mods-disabled/jira/` | `ctrl-a B`: a Jira project's board, read only, through `acli`: issues as cards in the board's columns (one column per status), opening on the active sprint and the issues assigned to the signed-in account (`a` shows everyone's; `s` opens a combobox of the sprints (active, coming, closed), the backlog as the top of the rank, and the latest 150 issues, with `/` to filter it), the selected issue beside it, hand one to the pane you came from, or `b` for its branch `<KEY>-<title words>`: create it (`git switch -c` in the repo of the pane you came from) or copy the name. Off by default: turn it on in Config → Mods |
 | `MAINTENANCE.md`, `docs/baseline/` | The maintenance run: how to bring my mods back in line with a new Herdr and with this repo's current rules, and Herdr's reference files as of the last run. Only on request; agents skip it otherwise |
 | `mods/auto-title/` | Names tabs automatically ([kryptamine/herdr-auto-title](https://github.com/kryptamine/herdr-auto-title)) |
 
@@ -43,6 +44,14 @@ In my layout, Hidden spaces are excluded from Go to (both scopes), the Agent hub
 
 Hidden's behavior checks run without changing the live window: `node --experimental-vm-modules --test mods/spaces-sections/hidden.test.js`.
 
+## Cursor in the Agents list
+
+Herdr adds a terminal to the Agents list only after that program reports its own status. Claude Code and Codex do this themselves. Cursor's `agent` CLI, and `cursor` when it starts the agent, runs as Node and never reports one, so a session that is plainly Cursor stays out of the Agents sidebar and the status bar keeps saying "0 agents".
+
+The Herdr TUI's Cursor integration (`herdr integration install cursor`) reports to the TUI. This desktop app only sets `HC_TERMINAL_ID` on the pane, so that integration never reaches it.
+
+`hooks/herdr-app-status.sh` is the bridge, installed as a Cursor user hook. It writes the status onto the Herdr pane: idle when a session starts, working when a message is sent, idle when the turn ends, and cleared when the session ends. Outside a Herdr pane it does nothing, so the same hook stays quiet in an ordinary terminal.
+
 ## Restore on a new machine
 
 ```sh
@@ -51,7 +60,25 @@ git clone git@github.com:raphaelmans/herdr-app.git ~/.config/herdr-app   # befor
 cd ~/.config/herdr-app && git init && git remote add origin git@github.com:raphaelmans/herdr-app.git \
   && git fetch && git checkout -f -t origin/main
 herdr-app do layout.switch --name mine
+mkdir -p ~/.cursor/hooks
+ln -sf ~/.config/herdr-app/hooks/herdr-app-status.sh ~/.cursor/hooks/herdr-app-status.sh
 ```
+
+`~/.cursor/hooks.json` holds the four commands. On a machine that already has that file, add them under `hooks` and leave the rest. A new file is:
+
+```json
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [{ "command": "./hooks/herdr-app-status.sh idle" }],
+    "beforeSubmitPrompt": [{ "command": "./hooks/herdr-app-status.sh working continue" }],
+    "stop": [{ "command": "./hooks/herdr-app-status.sh idle" }],
+    "sessionEnd": [{ "command": "./hooks/herdr-app-status.sh clear" }]
+  }
+}
+```
+
+A Cursor session that is already open keeps the status it last reported. Cursor reads the hook when it starts a session.
 
 Clone the toolchain standard beside it (`git clone git@github.com:raphaelmans/toolchain.git ~/toolchain`): it decides which installer owns each program and at which version, and `./health.sh` follows it. Then run `./health.sh`: it lists the programs still to install, and works before Herdr has started. Config (`cmd-shift-m`) shows the same on its Health page (`8`). What this setup is by default, and how to put any part back, is in `DEFAULTS.md`.
 
@@ -66,17 +93,18 @@ What Health looks for, in case the page cannot open. Needed ones stop a mod's ma
 | Skillshare | the Skillshare panel | yes | `mise use --global github:runkids/skillshare@latest` |
 | mise | installing the ones it owns | extra | `curl https://mise.run \| sh` |
 | Worktrunk (`wt`) | worktrees, the Worktrunk page | extra | `mise use --global worktrunk@latest` |
-| jq | model sync, reading each agent's settings | extra | `mise use --global jq@1` |
+| jq | model sync, reading each agent's settings, the Jira board | yes | `mise use --global jq@1` |
 | curl | model sync, Auto Title's install | extra | comes with macOS |
 | herdr-viz | publishing artifacts | extra | `ln -sf ~/.config/herdr-app/mods/viz/herdr-viz ~/.local/bin/herdr-viz` |
 | Node | herdr-viz runs on it | extra | `mise use --global node@26` |
 | Google Chrome | page previews in artifacts | extra | `brew install --cask google-chrome` |
 | Auto Title service | naming tabs | extra | open Auto Title (`cmd-alt-t`): it installs its own copy |
 | lazygit | upstream workflows from the native Git dialog (`L`), with its own config and custom commands | extra | `mise use --global lazygit@latest` |
+| GitHub CLI (`gh`) | organizations, repositories and pull requests on this computer | yes | `mise use --global gh@2` |
 | POSIX shell (`sh`) | bounded Git reads, patch application and rebase plans | yes | system `sh` on macOS/Linux; Git for Windows' `sh` on PATH |
 | fd | listing files for Find a file (`cmd-o`) | yes | `mise use --global fd@10` |
 | ripgrep (`rg`) | listing files for Find a file when fd is not here | extra | `mise use --global ripgrep@15` |
-| Atlassian CLI (`acli`) | Jira's real issues, once the Jira mod is on | extra | `brew tap atlassian/homebrew-acli && brew install acli` |
+| Atlassian CLI (`acli`) | the Jira board, read only | yes | `brew tap atlassian/homebrew-acli && brew install acli` |
 | Obsidian | opening the connected vault | extra | install from obsidian.md |
 
 `mods/config/requirements.json` is the list Health reads, and each mod's `mod.json` says under `spec` which ones it needs; change this table with them.

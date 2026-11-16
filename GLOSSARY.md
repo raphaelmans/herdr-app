@@ -255,6 +255,20 @@ An ordered list of commits and what to do with each: keep, reword, edit, squash,
 **Custom patch**:
 Selected changed lines or hunks from one commit, collected across its files. It can be applied, reversed, removed from that commit or split into a new commit.
 
+### GitHub
+
+**Organization**:
+A GitHub organization the account signed in on this computer belongs to. The Pull requests window lists the repositories of the one selected.
+_Avoid_: org, team, account (the account is who is signed in on this computer)
+
+**Pull request**:
+A proposed change GitHub has in one repository of the selected organization.
+_Avoid_: pull (that is bringing another agent's output), PR
+
+**Pull requests**:
+The window that lists an organization's repositories and the pull requests of the repository selected. It reads them with `gh` on this computer.
+_Avoid_: GitHub panel, pulls
+
 ### The window
 
 **Curtain**:

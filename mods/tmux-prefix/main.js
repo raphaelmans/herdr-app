@@ -42,6 +42,7 @@ const BINDINGS = [
   ["i", "Send box", "mod.open", { name: "send-box" }],
   ["m", "Agent hub", "mod.open", { name: "agent-hub" }],
   ["L", "Lific", "mod.open", { name: "lific" }],
+  ["P", "Pull requests", "mod.open", { name: "prs" }],
   ["B", "Jira", "mod.open", { name: "jira" }],
   ["f", "Fork agent session", "mod.open", { name: "agent-fork" }],
   ["M", "Config", "mod.open", { name: "config" }],
