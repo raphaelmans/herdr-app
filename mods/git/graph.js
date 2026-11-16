@@ -9,13 +9,14 @@ import { PathBuilder } from "gpui-kit";
 export const ROW = 26, LANE = 16, PAD = 14;
 export const UNCOMMITTED = "*";
 // With --decorate=full, so a branch, a remote branch and a tag can be told apart.
-// %ct last: the commit time dateOrder() sorts by.
+// %ct last: the commit time.
 export const GRAPH_FORMAT = "%H%x1f%P%x1f%D%x1f%s%x1f%an%x1f%cd%x1f%ct";
-export const graphWidth = (lanes) => Math.max(56, PAD * 2 + (Math.min(lanes, 14) - 1) * LANE);
+// Every lane emitted by layout() must fit, including wide merge histories.
+export const graphWidth = (lanes) => Math.max(56, PAD * 2 + (lanes - 1) * LANE);
 
 // A commit's labels. A remote branch on the same commit as its local one
 // joins that label ("main | origin"), as in Git Graph.
-function refsOf(text) {
+export function refsOf(text,remoteNames=null) {
   const heads = [], remotes = [], tags = [];
   let current = null, detached = false;
   for (let r of text.split(", ").filter(Boolean)) {
@@ -27,8 +28,9 @@ function refsOf(text) {
   }
   const out = [...heads];
   for (const r of remotes) {
-    const cut = r.indexOf("/"), local = heads.find((h) => h.name === r.slice(cut + 1));
-    if (local) local.remotes.push(r.slice(0, cut)); else out.push({ kind: "remote", name: r, remotes: [] });
+    const remote=remoteNames?.filter(name=>r.startsWith(`${name}/`)).sort((a,b)=>b.length-a.length)[0]??(remoteNames?null:r.slice(0,r.indexOf("/")));
+    const local=remote&&heads.find(h=>h.name===r.slice(remote.length+1));
+    if (local) local.remotes.push(remote); else out.push({ kind: "remote", name: r, remotes: [] });
   }
   if (detached) out.unshift({ kind: "head", name: "HEAD", current: true, remotes: [] });
   return [...out, ...tags.map((name) => ({ kind: "tag", name, remotes: [] }))];
@@ -37,30 +39,8 @@ function refsOf(text) {
 export function parseLog(text) {
   return text.split("\n").filter(Boolean).map((line) => {
     const [hash, parents, refs, subject, who, when, time] = line.split("\x1f");
-    return { hash, parents: parents ? parents.split(" ") : [], refs: refsOf(refs ?? ""), subject: subject ?? "", who: who ?? "", when: when ?? "", time: Number(time) || 0 };
+    return { hash, parents: parents ? parents.split(" ") : [], refs: refsOf(refs ?? ""), rawRefs:refs??"", subject: subject ?? "", who: who ?? "", when: when ?? "", time: Number(time) || 0 };
   });
-}
-
-// git log --date-order, done here: children before their parents, otherwise
-// newest first. Asked of git, that order makes it walk the whole history
-// before it prints the first commit (seconds on a few hundred thousand
-// commits); without it git streams the newest commits and stops, and this
-// puts those in the same order.
-export function dateOrder(commits) {
-  const at = new Map(commits.map((cm, n) => [cm.hash, n]));
-  const kids = new Array(commits.length).fill(0);
-  for (const cm of commits) for (const p of cm.parents) { const n = at.get(p); if (n !== undefined) kids[n]++; }
-  // Commits whose children are all placed, in the order they became so.
-  const ready = [], out = [];
-  commits.forEach((_cm, n) => { if (!kids[n]) ready.push(n); });
-  while (ready.length) {
-    let best = 0;
-    for (let i = 1; i < ready.length; i++) if (commits[ready[i]].time > commits[ready[best]].time) best = i;
-    const cm = commits[ready.splice(best, 1)[0]];
-    out.push(cm);
-    for (const p of cm.parents) { const n = at.get(p); if (n !== undefined && --kids[n] === 0) ready.push(n); }
-  }
-  return out;
 }
 
 // Commits come children first. A lane waits for one commit (its hash); a
@@ -121,4 +101,13 @@ export function graphCell(row, width, ink, bg, head) {
   parts.push(div().absolute().left(xc - 5).top(mid - 5).w(10).h(10).rounded(5)
     .bg(hollow ? bg : ink(row.color)).when(hollow, (e) => e.border(2).border_color(ink(row.color))));
   return div().relative().flex_none().w(width).h(ROW).overflow_hidden().children(parts);
+}
+
+// The edges leaving the primary row continue through its inline details gap.
+export function graphGapLanes(row) {
+  return [...new Map([...row.through.map(edge=>[edge.col,edge.color]),...row.outs.map(edge=>[edge.to,edge.color])]).entries()];
+}
+export function graphGap(row,width,height,ink) {
+  return div().relative().flex_none().w(width).h(height).overflow_hidden().children(graphGapLanes(row).map(([col,color])=>
+    window.paint_path(PathBuilder.stroke(2).move_to(PAD+col*LANE,0).line_to(PAD+col*LANE,height).build(),ink(color)).absolute().inset_0()));
 }

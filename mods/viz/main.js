@@ -14,11 +14,14 @@
 // - library (props {library, home}): every artifact. Project (default: the project of the pane it
 //   was opened from) or All; Archived. Show in pane, open, copy path, archive, delete.
 
-import { View, div } from "gpui-kit";
+import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, ScrollHandle, InputState, Input } from "gpui-base";
 import { agents, closeOverlay, exec, home, nextCommand, notify, panes, props, run, setShared, shared, theme, watchFolder } from "herdr";
 import * as fs from "fs/promises";
 import { build, pad, part, reanchor, sourceOf, ago, tail, tildify } from "./render.js";
+
+// A wait: one spinner, turned natively, and what is being waited for.
+const waiting = (t, label) => h_flex().gap(8).items_center().child(svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900)).child(label);
 import {
   blockRow, hints, initNotes, keys as noteKeys, moved, overlay, pending, release, send, setMode, tint, unhover, wantsKey,
 } from "./annotate.js";
@@ -182,7 +185,7 @@ export default class Viz extends View {
       .child(div().flex_none().w(7).h(7).rounded(4).bg(status ? t[status] ?? t.dim : t.dim))
       .child(div().flex_1().min_w(0).truncate().text_size(12.5).font_semibold().text_color(t.foreground).child(a ? a.title : "Artifact"))
       .when(Boolean(a), (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).child(`${tail(a.project)} · ${ago(a.updated)}`)))
-      .when(unsent > 0, (el) => el.child(this.button("pane-send", this.sending ? "Sending…" : `Send ${unsent} to agent`, t,
+      .when(unsent > 0, (el) => el.child(this.button("pane-send", this.sending ? waiting(t, "Sending") : `Send ${unsent} to agent`, t,
         (_e, cx) => { this.handle.focus(); send(this, cx); cx.notify(); })))
       .when(Boolean(a), (el) => el.child(this.mode
         ? this.button("pane-annotate", "Annotating · esc", t, (_e, cx) => { setMode(this, false); cx.notify(); }, { primary: true })

@@ -1,0 +1,3 @@
+{ "place": "none", "title": "Lific request", "overlay": { "kind": "popup", "width": 8, "height": 8, "frame": "none" },
+  "spec": {"needs": ["lific"]}
+}

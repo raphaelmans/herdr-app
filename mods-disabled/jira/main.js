@@ -23,19 +23,20 @@
 // Opened with ctrl-a B (tmux-prefix). It's a window: drag it by any empty spot,
 // it reopens where you left it.
 //
-// It only reads. Where the issues come from is a source (./stub.js says what one
-// is): today only the stub, made-up data for designing the board without Jira.
-// A real source goes next to it and into SOURCES; nothing else here changes.
+// It only reads. Issues come from ./acli.js (READ access only). The last board
+// is shown at once; acli runs again only when that read is old, or on r.
+// The description and comments of the selected issue are read when it is shown.
 // The mod is off by default (Config → Mods turns it on).
 
-import { View, div } from "gpui-kit";
-import { v_flex, h_flex, ScrollHandle, Scrollbar, InputState, Input, TextView, Popup } from "gpui-base";
-import { closeOverlay, exec, focused, nextCommand, notify, panes, props, run, setShared, spaces, theme } from "herdr";
-import * as stub from "./stub.js";
+import { View, div, svg } from "gpui-kit";
+import { v_flex, h_flex, ScrollHandle, VirtualListScrollHandle, v_virtual_list, Scrollbar, InputState, Input, TextView, Popup } from "gpui-base";
+import { checking, closeOverlay, exec, focused, nextCommand, notify, panes, props, run, setShared, spaces, theme } from "herdr";
+import * as acli from "./acli.js";
 
-const SOURCES = { stub };
-const SOURCE = "stub";
+const SOURCES = { acli };
+const SOURCE = "acli";
 const DETAIL_W = 400;
+const BACKLOG_ROW = 36; // a backlog issue and the space under it, px
 const LINE = 21;  // a line of body text, px (for scrolling by the keyboard)
 const PRIORITY = { highest: 0, high: 1, medium: 2, low: 3, lowest: 4 };
 const PRIORITY_MARK = { highest: "↑↑", high: "↑", medium: "=", low: "↓", lowest: "↓↓" };
@@ -56,6 +57,10 @@ function blocks(text) {
   flush();
   return out;
 }
+
+// A wait: one spinner, turned natively, and what is being waited for.
+const waiting = (t, label) => h_flex().flex_none().gap(8).items_center().text_size(12.5).text_color(t.muted)
+  .child(svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900)).child(label);
 
 // Escape is bound to an action of this mod's own: while a text field has the
 // keyboard, Herdr closes the window on Escape before any key handler here sees it.
@@ -101,7 +106,10 @@ export default class Jira extends View {
     this.handle = cx.focus_handle();
     this.handle.focus();
     cx.timer.after(150, () => { if (!this.searching) this.handle.focus(); });
-    this.colScroll = {};   // column id -> its scroll handle
+    // Column id -> its scroll handle. The backlog is one long list, so only
+    // the rows in view are built: it scrolls by a virtual list's handle.
+    this.colScroll = { backlog: VirtualListScrollHandle.new() };
+    this.hay = new WeakMap(); // issue -> the text a search looks in
     this.bodyScroll = ScrollHandle.new();
 
     this.search = InputState.new({ placeholder: "Search key, title, label, person" });
@@ -120,7 +128,7 @@ export default class Jira extends View {
     this.scopeFilter.on("focus", (_e, cx) => { this.scopeTyping = true; cx.notify(); });
     this.scopeFilter.on("blur", (_e, cx) => { this.scopeTyping = false; cx.notify(); });
 
-    this.start(cx);
+    if (!checking()) this.start(cx);
     cx.spawn(async (cx) => {
       for (;;) { const c = await nextCommand(); if (c === "focus" && !this.searching) { this.handle.focus(); cx.notify(); } }
     });
@@ -129,61 +137,117 @@ export default class Jira extends View {
   fail(e, cx) {
     this.error = String(e?.message ?? e);
     this.loaded = true;
+    this.reading = null;
     cx.notify();
   }
 
-  // The account, the projects, how many open issues you have in each, and the first board.
+  chooseProject() {
+    if (this.project && this.projects.some((p) => p.key === this.project)) return;
+    let saved = null;
+    try { saved = localStorage.getItem(`project:${this.spaceId}`); } catch {}
+    const has = (key) => this.projects.some((p) => p.key === key);
+    // The space's name or folder against each project's name and key.
+    const guess = this.projects.find((p) => {
+      const names = [slug(p.name), slug(p.key)].filter((n) => n.length > 2);
+      return this.hints.some((h) => names.some((n) => h === n || h.includes(n) || n.includes(h)));
+    });
+    // With no match: the first project where you have open work, else the first one.
+    this.project = (has(saved) && saved) || guess?.key
+      || this.projects.find((p) => this.counts[p.key] > 0)?.key || this.projects[0]?.key || null;
+  }
+
+  // Paint the last board before any acli call. Returns whether a list is on screen.
+  showRemembered() {
+    const remembered = this.source.remembered();
+    if (remembered.me) this.me = remembered.me;
+    if (remembered.projects.length) this.projects = remembered.projects;
+    if (remembered.counts) this.counts = remembered.counts;
+    if (!this.projects.length) return false;
+    this.chooseProject();
+    if (!this.project) return false;
+    const sprints = remembered.boards[this.project]?.sprints ?? [];
+    this.boards[this.project] = { columns: [], sprints };
+    const scope = this.scope(this.project);
+    const list = this.source.rememberedList(`${this.project}|${scope}`);
+    if (!list) return false;
+    const columns = this.source.columns(list);
+    this.boards[this.project] = { columns, sprints };
+    for (const col of [...columns, { id: "backlog" }]) this.colScroll[col.id] ??= ScrollHandle.new();
+    this.issues[`${this.project}|${scope}`] = list;
+    return true;
+  }
+
+  // The account, the projects, and the board. Open-issue counts follow, so they
+  // don't hold the cards back.
   start(cx) {
     cx.spawn(async (cx) => {
       try {
-        const [me, projects] = await Promise.all([this.source.me(), this.source.projects(), this.count()]);
-        this.me = me;
-        this.projects = Array.isArray(projects) ? projects : [];
-        let saved = null;
-        try { saved = localStorage.getItem(`project:${this.spaceId}`); } catch {}
-        const has = (key) => this.projects.some((p) => p.key === key);
-        // The space's name or folder against each project's name and key.
-        const guess = this.projects.find((p) => {
-          const names = [slug(p.name), slug(p.key)].filter((n) => n.length > 2);
-          return this.hints.some((h) => names.some((n) => h === n || h.includes(n) || n.includes(h)));
-        });
-        // With no match: the first project where you have open work, else the first one.
-        this.project = (has(saved) && saved) || guess?.key
-          || this.projects.find((p) => this.counts[p.key] > 0)?.key || this.projects[0]?.key || null;
-        if (this.project) await this.read(this.project);
-        this.error = null;
-        this.loaded = true;
-        cx.notify();
+        await this.source.restore();
+        if (this.showRemembered()) { this.error = null; this.loaded = true; cx.notify(); }
+        await this.pull(false, cx);
       } catch (e) { this.fail(e, cx); }
     });
   }
 
-  async count() {
-    const counts = await this.source.openMine().catch(() => null);
+  async pull(force, cx) {
+    const counts = this.count(force);
+    const [me, projects] = await Promise.all([this.source.me(), this.source.projects()]);
+    this.me = me;
+    this.projects = Array.isArray(projects) ? projects : [];
+    // The first choice of project may fall to "where you have open work":
+    // that one waits for the counts. Every later read does not.
+    if (!this.project && !Object.keys(this.counts).length) await counts;
+    this.chooseProject();
+    if (this.project) await this.read(this.project, force);
+    this.error = null;
+    this.loaded = true;
+    this.reading = null;
+    cx.notify();
+    await counts;
+    cx.notify();
+  }
+
+  async count(force) {
+    const counts = await this.source.openMine({ force }).catch(() => null);
     if (counts) this.counts = counts;
   }
 
-  // A project's columns and sprints, then the issues of the scope it is on.
-  async read(project) {
-    const b = await this.source.board(project);
-    this.boards[project] = { columns: b?.columns ?? [], sprints: b?.sprints ?? [] };
-    // Made here, not while drawing: a scroll handle cannot be created during render.
-    for (const col of [...this.boards[project].columns, { id: "backlog" }]) this.colScroll[col.id] ??= ScrollHandle.new();
+  // A project's sprints, then the issues of the scope it is on. Columns are the
+  // statuses of those issues. Sprints are stored before the scope is chosen:
+  // with none stored yet, the first scope would be the backlog.
+  async read(project, force = false) {
+    const b = await this.source.board(project, { force });
+    this.boards[project] = { columns: this.boards[project]?.columns ?? [], sprints: b?.sprints ?? [] };
     const scope = this.scope(project);
-    const want = scope === "backlog" ? { backlog: true } : scope === "all" ? {} : { sprint: scope.slice(7) };
-    const list = await this.source.issues(project, want);
+    const want = this.issueQuery(scope);
+    const list = await this.source.issues(project, want, { force });
+    const columns = this.source.columns(list);
+    this.boards[project] = { columns, sprints: b?.sprints ?? [] };
+    // Made here, not while drawing: a scroll handle cannot be created during render.
+    for (const col of [...columns, { id: "backlog" }]) this.colScroll[col.id] ??= ScrollHandle.new();
     this.issues[`${project}|${scope}`] = Array.isArray(list) ? list : [];
   }
 
-  reload(cx) {
+  reload(cx, force = false) {
     if (!this.project) return this.start(cx);
     const project = this.project;
-    if (!this.boards[project] || !this.issues[`${project}|${this.scope(project)}`]) this.reading = project;
+    const have = this.issues[`${project}|${this.scope(project)}`];
+    if (!have) this.reading = project;
     cx.spawn(async (cx) => {
-      try { await Promise.all([this.read(project), this.count()]); this.error = null; } catch (e) { this.fail(e, cx); }
+      try { await this.pull(force, cx); }
+      catch (e) {
+        if (have) notify({ title: "Jira didn't refresh", body: String(e?.message ?? e), level: "warning", timeout: 3000 });
+        else this.fail(e, cx);
+      }
       if (this.reading === project) this.reading = null;
       cx.notify();
     });
+  }
+
+  issueQuery(scope) {
+    if (scope === "backlog") return { backlog: true };
+    if (scope === "all") return {};
+    return { sprint: scope.slice(7) };
   }
 
   // The scope a project is on: the one picked, the one remembered, else the first (the active sprint).
@@ -210,8 +274,8 @@ export default class Jira extends View {
     return [
       ...of("active", "Active"),
       ...of("future", "Coming"),
-      { id: "backlog", name: "Backlog", group: "Not in a sprint", note: "ranked list" },
-      { id: "all", name: "All issues", group: "Not in a sprint", note: "every sprint and the backlog" },
+      { id: "backlog", name: "Backlog", group: "Not in a sprint", note: "first 200" },
+      { id: "all", name: "All issues", group: "Not in a sprint", note: "latest 150" },
       ...of("closed", "Closed").reverse(),
     ];
   }
@@ -293,15 +357,30 @@ export default class Jira extends View {
     const scope = b && this.scope(this.project);
     const all = b && this.issues[`${this.project}|${scope}`];
     if (!all) return [];
+    // Asked several times per key press and per draw: worked out once for the
+    // same list, search and filter. A detail arriving changes none of them.
+    const m = this.drawn;
+    if (m && m.all === all && m.columns === b.columns && m.query === this.query && m.who === this.who && m.me === this.me?.id) return m.out;
     const q = this.query.trim().toLowerCase().split(/\s+/).filter(Boolean);
-    const hit = (i) => { const hay = `${i.key} ${i.title} ${i.status} ${i.assignee?.name ?? "unassigned"} ${(i.labels ?? []).join(" ")}`.toLowerCase(); return q.every((w) => hay.includes(w)); };
-    const keep = q.length ? hit : this.who === "mine" ? (i) => this.mine(i) : () => true;
-    if (scope === "backlog") return [{ col: { id: "backlog", name: "Backlog" }, cards: all.filter(keep), list: true }];
-    return b.columns.map((col) => ({
-      col,
-      cards: all.filter((i) => i.column === col.id && keep(i)).sort((x, y) =>
-        (PRIORITY[x.priority] ?? 9) - (PRIORITY[y.priority] ?? 9) || String(y.updated).localeCompare(String(x.updated))),
-    }));
+    const hay = (i) => {
+      let text = this.hay.get(i);
+      if (text === undefined) this.hay.set(i, text = `${i.key} ${i.title} ${i.status} ${i.assignee?.name ?? "unassigned"} ${(i.labels ?? []).join(" ")}`.toLowerCase());
+      return text;
+    };
+    const keep = q.length ? (i) => { const text = hay(i); return q.every((w) => text.includes(w)); }
+      : this.who === "mine" ? (i) => this.mine(i) : () => true;
+    let out;
+    if (scope === "backlog") out = [{ col: { id: "backlog", name: "Backlog" }, cards: all.filter(keep), list: true }];
+    else {
+      // One pass over the issues, then each column by priority. Equal
+      // priorities stay in the order Jira gave, so cards do not move as
+      // their details arrive.
+      const by = new Map(b.columns.map((col) => [col.id, []]));
+      for (const i of all) if (keep(i)) by.get(i.column)?.push(i);
+      out = b.columns.map((col) => ({ col, cards: by.get(col.id).sort((x, y) => (PRIORITY[x.priority] ?? 9) - (PRIORITY[y.priority] ?? 9)) }));
+    }
+    this.drawn = { all, columns: b.columns, query: this.query, who: this.who, me: this.me?.id, out };
+    return out;
   }
 
   // Where the selected card is: { c, r, issue }, or the first card there is.
@@ -324,7 +403,43 @@ export default class Jira extends View {
     const cols = this.columns(), pos = this.at(cols);
     if (pos) this.colScroll[cols[pos.c].col.id]?.scroll_to_item(pos.r);
     this.resetScroll();
+    this.loadDetail(key, cx);
     cx.notify();
+  }
+
+  // The issue in the list on screen. Another scope's list can hold a copy
+  // with the same key: that one is not what is drawn.
+  issueByKey(key) {
+    const list = this.issues[`${this.project}|${this.scope(this.project)}`] ?? [];
+    return list.find((i) => i.key === key) ?? null;
+  }
+
+  // The description, comments, points and sprint of the issue on screen, read
+  // once the selection has rested on it: holding j down a column reads the
+  // card it stops on, not every card it passes.
+  loadDetail(key, cx) {
+    const issue = this.issueByKey(key);
+    if (!issue || issue.detail || this.readingDetail === key || this.detailDue === key || checking()) return;
+    this.detailDue = key;
+    cx.timer.after(200, (cx) => {
+      if (this.detailDue !== key) return;
+      this.detailDue = null;
+      if (this.selected !== key || this.issueByKey(key)?.detail) return;
+      this.readingDetail = key;
+      cx.spawn(async (cx) => {
+        try {
+          const extra = await this.source.issue(key);
+          const live = this.issueByKey(key);
+          if (live && extra) Object.assign(live, extra);
+        } catch (e) {
+          // Kept apart from the description: Send hands that to an agent.
+          const live = this.issueByKey(key);
+          if (live && !live.detail) { live.detail = true; live.unread = String(e?.message ?? e); }
+        }
+        if (this.readingDetail === key) this.readingDetail = null;
+        cx.notify();
+      });
+    });
   }
 
   // Up and down the column, around its ends.
@@ -415,6 +530,7 @@ export default class Jira extends View {
   hand() {
     const cur = this.current();
     if (!cur) return;
+    if (!cur.detail) return notify({ title: "Still reading that issue", body: "The description is on its way.", level: "info", timeout: 2000 });
     if (!this.home) return notify({ title: "No pane to send to", body: "Open Jira from a terminal pane.", level: "warning", timeout: 2500 });
     const body = (cur.description ?? "").trim();
     const text = `Work on Jira issue ${cur.key}: ${cur.title}\n\n${body ? `${body}\n\n` : ""}${cur.url ? `${cur.url}\n` : ""}`;
@@ -548,7 +664,7 @@ export default class Jira extends View {
       g: () => this.edge(false, cx), p: () => this.switchProject(1, cx),
       a: () => this.toggleWho(cx), s: () => this.openScope(cx), z: () => this.toggleDetail(cx),
       enter: () => this.hand(), i: () => this.hand(), b: () => this.openBranch(cx),
-      y: () => this.copy(cx), o: () => this.web(), r: () => this.reload(cx),
+      y: () => this.copy(cx), o: () => this.web(), r: () => this.reload(cx, true),
       q: () => this.close(), escape: () => this.close(),
     };
     if (map[k]) { map[k](); done(); }
@@ -563,7 +679,10 @@ export default class Jira extends View {
     const pos = this.at(cols);
     const cur = pos?.issue ?? null;
     if (cur && cur.key !== this.selected) this.selected = cur.key;
+    if (cur && !cur.detail) this.loadDetail(cur.key, cx);
     const shown = cols.reduce((n, c) => n + c.cards.length, 0);
+    const read = this.issues[`${this.project}|${this.scope(this.project)}`];
+    const capped = Boolean(read) && !listed && read.length >= this.source.SPRINT_CAP;
     const stop = (_e, cx) => cx.stop_propagation();
     const clear = t.popover.slice(0, 7) + "00";
     // A column's color by its place: the first is to do, the last is done.
@@ -609,9 +728,7 @@ export default class Jira extends View {
             .text_size(10).text_color(on ? t.accent_foreground : t.muted).child(String(open))));
       }))
       .when(!this.projects.length, (e) => e.child(div().px(6).text_size(12.5).font_semibold().child("Jira")))
-      .child(div().flex_1())
-      .when(this.source.name === "stub", (e) => e.child(div().flex_none().h(20).px(7).rounded(5).border_1().border_color(t.blocked)
-        .text_size(10.5).text_color(t.blocked).child("stub data")));
+      .child(div().flex_1());
 
     // The scope combobox: a trigger that names the scope, and under it the options.
     const current = this.scope(this.project);
@@ -656,7 +773,7 @@ export default class Jira extends View {
 
     const bar = h_flex().h(38).px(12).gap(8).flex_none().items_center().overflow_hidden().border_b(1).border_color(t.border)
       .child(div().flex_none().text_size(13).font_semibold().text_color(t.foreground).child(listed ? "Backlog" : "Board"))
-      .child(div().flex_none().text_size(11).text_color(t.dim).child(`${shown} ${shown === 1 ? "issue" : "issues"}`))
+      .child(div().flex_none().text_size(11).text_color(t.dim).child(`${shown} ${shown === 1 ? "issue" : "issues"}${capped ? ` · first ${this.source.SPRINT_CAP} of the sprint` : ""}`))
       .child(this.searching || this.query
         ? h_flex().flex_1().min_w(0).h(26).px(8).gap(6).items_center().rounded(6)
             .border_1().border_color(this.searching ? t.accent : t.input).bg(t.background)
@@ -694,8 +811,6 @@ export default class Jira extends View {
       return h_flex().id(`jr-${i.key}`).w_full().h(34).px(10).gap(9).items_center().rounded(6).flex_none()
         .border_1().border_color(on ? t.accent : clear)
         .cursor_pointer().when(on, (e) => e.bg(t.selected)).when(!on, (e) => e.hover((s) => s.bg(t.hover)))
-        .on_mouse_down("left", stop)
-        .on_click((_e, cx) => { if (!this.searching) this.handle.focus(); this.select(i.key, cx); })
         .child(div().size(8).flex_none().rounded(2).bg(typeColor(i.type)))
         .child(div().w(62).flex_none().truncate().text_size(10.5).text_color(t.muted).child(i.key))
         .child(div().flex_1().min_w(0).truncate().text_size(12.5).text_color(t.foreground).child(i.title))
@@ -713,13 +828,22 @@ export default class Jira extends View {
           .child(div().size(7).flex_none().rounded(4).bg(list ? t.dim : tone(n, cols.length)))
           .child(div().flex_1().min_w(0).truncate().text_size(11).font_semibold().text_color(here ? t.foreground : t.muted).child(col.name.toUpperCase()))
           .child(div().flex_none().text_size(11).text_color(t.dim).child(String(cards.length))))
-        .child(div().relative().flex_1().min_h(0)
-          .child(v_flex().id(`jr-col-${col.id}`).absolute().inset_0().px(6).pb(6).overflow_x_hidden().gap(list ? 2 : 6).overflow_y_scroll().track_scroll(this.colScroll[col.id])
-            .children(cards.map(list ? row : card))));
+        .child(list
+          // Only the rows in view are built. A row inside a virtual list
+          // cannot hold a handler of its own: the list reports which was clicked.
+          ? div().relative().flex_1().min_h(0).on_mouse_down("left", stop)
+              .child(div().absolute().inset_0().px(6).child(v_virtual_list("jr-col-backlog", cards.length, BACKLOG_ROW, (n) => cards[n].key,
+                (range) => cards.slice(range.start, range.end).map((i) => div().w_full().h(BACKLOG_ROW).child(row(i))))
+                .on_item_click((key, cx) => { if (!this.searching) this.handle.focus(); this.select(key, cx); })
+                .track_scroll(this.colScroll.backlog).size_full()))
+              .child(Scrollbar.vertical("jr-col-backlog").viewport_from_layout().absolute().inset_0())
+          : div().relative().flex_1().min_h(0)
+              .child(v_flex().id(`jr-col-${col.id}`).absolute().inset_0().px(6).pb(6).overflow_x_hidden().gap(6).overflow_y_scroll().track_scroll(this.colScroll[col.id])
+                .children(cards.map(card))));
     };
 
     const empty = this.error ? this.error
-      : !this.loaded || this.reading ? "Reading…"
+      : !this.loaded || this.reading ? waiting(t, this.projects.length ? "Reading issues" : "Reading projects")
       : !this.projects.length ? "No Jira projects."
       : this.query ? `Nothing matches "${this.query}".`
       : this.who === "mine" ? `Nothing in ${scope.name} is assigned to you. Press a to see everyone's, s to pick another sprint or the backlog.`
@@ -751,13 +875,15 @@ export default class Jira extends View {
         fact("Type", h_flex().gap(6).items_center().child(div().size(8).rounded(2).bg(typeColor(cur.type))).child(text(cur.type))),
         fact("Priority", h_flex().gap(6).items_center().child(div().text_size(11).font_semibold().text_color(prioColor(cur.priority)).child(PRIORITY_MARK[cur.priority] ?? "")).child(text(cur.priority))),
         cur.points != null ? fact("Points", text(String(cur.points))) : null,
-        fact("Sprint", text(cur.sprint ?? "Backlog")),
+        fact("Sprint", text(cur.sprint ?? (cur.sprintKnown ? "Backlog" : "…"))),
         cur.labels?.length ? fact("Labels", text(cur.labels.join(", "))) : null,
         cur.updated ? fact("Updated", text(String(cur.updated).slice(0, 10))) : null,
       ].filter(Boolean);
       part(v_flex().pb(4).children(facts), facts.length * 22 + 4);
-      const md = blocks(cur.description);
-      if (!md.length) part(div().text_size(12.5).text_color(t.dim).child("No description."), LINE);
+      const md = cur.detail ? blocks(cur.description) : [];
+      if (!cur.detail) part(waiting(t, "Reading the issue"), LINE);
+      else if (cur.unread) part(div().text_size(12.5).text_color(t.blocked).child(`Could not read this issue. ${cur.unread}`), LINE * 2);
+      else if (!md.length) part(div().text_size(12.5).text_color(t.dim).child("No description."), LINE);
       md.forEach((b, n) => part(div().text_size(13).text_color(t.foreground)
         .child(TextView.markdown(`jr-md-${cur.key}-${n}`, b).selectable(true)), lines(b) * LINE));
       (cur.comments ?? []).forEach((c, n) => {

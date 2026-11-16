@@ -44,8 +44,10 @@ mods/*
 !mods/viz/
 !mods/config/
 !mods/lific/
+!mods/lific-request/
 !mods/stayawake/
 !mods/jira/
+!mods/worktrunk/
 !mods/agents-titled/
 !mods/curtain/
 !mods/status-bar/
@@ -57,6 +59,7 @@ mods/*
 !mods/file-picker/
 !mods/md-popup/
 !mods/lazygit/
+!mods/pull-requests/
 !mods/*/*.js
 !mods/*/mod.json
 !mods/config/vendored.json
@@ -77,6 +80,7 @@ mods/*
 !mods-disabled/
 mods-disabled/*
 !mods-disabled/jira/
+!mods-disabled/worktrunk/
 !mods-disabled/*/*.js
 !mods-disabled/*/mod.json
 !mods-disabled/*/*.svg

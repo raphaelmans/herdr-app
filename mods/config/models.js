@@ -255,10 +255,10 @@ export default class Models {
       .child(heading(t, "MODELS", this.search !== null ? `/${this.search}${this.searching ? "▏" : ""} · ${rows.length} of ${all.length}` : `${AGENTS[key].name} can be started with these · the newest of each family · starred first`))
       .child(v_flex().id("models-list").flex_1().min_h(0).overflow_y_scroll().track_scroll(this.scroll).children(rows.map(([id, name], i) => {
         const on = this.inside && i === at, has = stars.includes(id);
-        return h_flex().id(`model-${i}`).flex_none().h(26).px(10).gap(10).items_center().rounded(6).cursor_pointer()
+        return h_flex().id(`model-${id}`).flex_none().h(26).px(10).gap(10).items_center().rounded(6).cursor_pointer()
           .when(on, (el) => el.bg(t.selected)).when(!on, (el) => el.hover((s) => s.bg(t.hover)))
           .on_click((_e, cx) => { this.host.handle.focus(); this.enter(cx, i); })
-          .child(div().id(`star-${i}`).flex_none().w(14).text_color(has ? t.accent : t.dim).hover((s) => s.text_color(t.foreground))
+          .child(div().id(`star-${id}`).flex_none().w(14).text_color(has ? t.accent : t.dim).hover((s) => s.text_color(t.foreground))
             .on_click((_e, cx) => { cx.stop_propagation(); this.host.handle.focus(); this.inside = true; this.star(id, cx); }).child(has ? "★" : "☆"))
           .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(t.foreground).child(id))
           .child(div().flex_none().max_w(260).truncate().text_size(11).text_color(t.dim).child(name || (has ? "not in the catalog" : "")));

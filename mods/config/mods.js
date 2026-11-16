@@ -10,9 +10,10 @@
 
 import { div } from "gpui-kit";
 import { v_flex, h_flex, ScrollHandle } from "gpui-base";
-import { appHome, exec, keys, notify, readTextFile, shared } from "herdr";
+import { appHome, exec, keys, notify, readTextFile, setShared, shared } from "herdr";
 import * as fs from "fs/promises";
-import { chip, toggle } from "./ui.js";
+import { chip, toggle, waiting } from "./ui.js";
+import { enabled as worktrunkEnabled } from "./worktrunk.js";
 
 const OFF_DIR = "mods-disabled";
 const ROW = 54;
@@ -86,6 +87,9 @@ export default class Mods {
     let vendored = {};
     try { vendored = JSON.parse((await readTextFile(`${root}/mods/${this.host.self}/vendored.json`)) ?? "{}"); } catch {}
     const on = await dirs(`${root}/mods`), off = await dirs(`${root}/${OFF_DIR}`);
+    // Worktrunk's controls live in Config and the Launcher. Folder placement
+    // still owns its switch; tell already-open copies when it changes.
+    await worktrunkEnabled();
 
     // Which layouts name which mods.
     const inLayout = {};
@@ -173,6 +177,7 @@ export default class Mods {
       this.busy = null;
       if (failed) notify({ title: `Could not turn ${mod.title} ${mod.enabled ? "off" : "on"}`, body: failed, level: "error" });
       try { await this.scan(); } catch (e) { this.error = String(e?.message ?? e); }
+      if (!failed) this.host.changed?.(mod.name, cx);
       const i = this.mods.findIndex((m) => m.name === mod.name);
       if (i >= 0) this.at = i;
       cx.notify();
@@ -238,7 +243,7 @@ export default class Mods {
         .child(div().font_semibold().text_color(t.muted).child(label)).child(div().text_color(t.dim).child(note(of.length, of.filter((m) => !m.enabled).length)));
     };
     return v_flex().size_full().min_h(0).gap(6)
-      .when(!this.mods, (el) => el.child(div().px(4).text_color(t.dim).child("Reading mods…")))
+      .when(!this.mods, (el) => el.child(div().px(4).text_color(t.dim).child(waiting(t, "Reading mods"))))
       .when(Boolean(this.error), (el) => el.child(div().px(4).text_color(t.blocked).child(this.error)))
       .child(v_flex().id("mod-list").flex_1().min_h(0).gap(2).overflow_y_scrollbar().track_scroll(this.scroll)
         .children(this.entries().map((e) => (e.mod ? this.row(t, e.mod, e.i) : heading(e.group)))));

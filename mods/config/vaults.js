@@ -127,7 +127,7 @@ export default class Vaults {
       .child(v_flex().id("vault-rows").flex_1().min_h(0).gap(2).overflow_y_scroll()
         .children(vaults.map((v, i) => {
           const on = now?.path === v.path, here = i === at;
-          return h_flex().id(`vault-${i}`).flex_none().h(42).px(10).gap(10).items_center().rounded(8).cursor_pointer()
+          return h_flex().id(`vault-${v.path}`).flex_none().h(42).px(10).gap(10).items_center().rounded(8).cursor_pointer()
             .when(here, (el) => el.bg(t.selected)).when(!here, (el) => el.hover((s) => s.bg(t.hover)))
             .on_click((_e, cx) => { this.at = i; this.host.handle.focus(); this.connect(v, cx); })
             .child(box(t, on))

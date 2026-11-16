@@ -63,6 +63,7 @@
     "cmd-shift-e": "nvim-pane.show",
     "cmd-alt-t": "mod.open:auto-title",
     "cmd-i": "mod.open:send-box",
+    "cmd-shift-i": "mod.open:lific-request",
     "cmd-g": "mod.open:git",
     "cmd-j": "mod.open:agent-hub",
     "cmd-shift-a": "mod.open:viz",

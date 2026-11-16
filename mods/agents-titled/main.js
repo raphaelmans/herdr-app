@@ -82,6 +82,26 @@ const ROW_MENU = [
   { id: "pin", label: "Pin to the top", icon: "mods/workspace-chrome/pin.svg" },
 ];
 
+// Space marks: a space's first letter on its color, as the spaces sidebar and
+// Go to draw them. Colors are kept by space id in shared "space.colors" (a
+// theme color name or #rrggbb). A space seen without one gets the theme color
+// fewest spaces use, once; every mod does the same in the same order, so they agree.
+const MARK = { ansi6: "#22a99a", ansi3: "#e3814f", ansi4: "#5b8def", ansi5: "#8b7cf6", ansi2: "#3fae6a", ansi1: "#d9649a" };
+const PROJECT_COLORS = ["ansi6", "ansi3", "ansi4", "ansi5", "ansi2", "ansi1"];
+function spaceColors(all) {
+  const ids = new Set(all.map((p) => p.id));
+  const kept = Object.fromEntries(Object.entries(shared("space.colors") ?? {}).filter(([id]) => ids.has(id)));
+  let changed = Object.keys(kept).length !== Object.keys(shared("space.colors") ?? {}).length;
+  for (const p of all) {
+    if (kept[p.id] || p.name === "~") continue;
+    const uses = (c) => Object.values(kept).filter((v) => v === c).length;
+    kept[p.id] = PROJECT_COLORS.reduce((best, c) => (uses(c) < uses(best) ? c : best));
+    changed = true;
+  }
+  if (changed) setShared("space.colors", kept);
+  return kept;
+}
+
 const RANK = { blocked: 4, done: 3, working: 2, idle: 1 };
 // A sub-agent without a pane isn't in agents(): its raw word, error counting as
 // blocked. It's never done: it reports to its parent, and the parent's done is the news.
@@ -435,7 +455,16 @@ export default class Agents extends View {
     // otherwise read the same.
     // Read the pane snapshot once: every host read copies the whole list into JS.
     const leads = leadPanes(panes());
-    const tabs = new Map(spaces().flatMap(s => s.tabs).map(tab => [tab.id, tab]));
+    const allSpaces = spaces();
+    const tabs = new Map(allSpaces.flatMap(s => s.tabs).map(tab => [tab.id, tab]));
+    const colors = spaceColors(allSpaces);
+    const spaceMark = (a) => {
+      const name = a.space_name || "";
+      const c = colors[a.space];
+      const fill = name === "~" ? t.dim : c?.startsWith("#") ? c : (MARK[c ?? PROJECT_COLORS[0]] ?? t[c]);
+      return h_flex().size(18).flex_none().rounded(5).bg(fill).items_center().justify_center()
+        .text_size(10.5).font_bold().text_color("#ffffff").child([...name][0]?.toUpperCase() ?? "?");
+    };
     const kept = new Map(all.map((k) => [k.address, k.labels?.[TITLE_LABEL]]));
     const labels = new Map(list.map(a => {
       const tab = tabs.get(a.tab);
@@ -528,13 +557,14 @@ export default class Agents extends View {
             this.folded.has(a.address) ? this.folded.delete(a.address) : this.folded.add(a.address);
             cx.notify();
           })).child(pic)))
-        // The title, then a quieter line: the tab badge and the space (an Agent row).
+        // The title, then a quieter line: the space mark, the tab badge and the space (an Agent row).
         .child(v_flex().flex_1().min_w(0).gap(1)
           .child(div().min_w(0).truncate().text_color(idle ? t.muted : t.foreground)
             // Pulses while its title is being written.
             .when(this.titling.has(a.address), el => el.loop("opacity", { from: 0.35, to: 1, period: 1200 }))
             .child(heading))
           .child(h_flex().min_w(0).gap(6).items_center()
+            .when(Boolean(a.space_name), el => el.child(spaceMark(a)))
             .when(tabNo != null, el => el.child(badge))
             .child(div().flex_1().min_w(0).truncate().text_size(11).text_color(t.dim).child(a.space_name || ""))))
         .when(Boolean(machine), el => el.child(div().text_size(10).text_color(t.dim).child(machine)))

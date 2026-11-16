@@ -2,5 +2,5 @@
   "place": "none",
   "title": "New tab",
   "overlay": { "kind": "dialog", "width": 500, "height": 680, "frame": "none" },
-  "spec": {"needs": ["git"], "extras": ["wt", "jq"]}
+  "spec": {"needs": ["git"], "extras": ["jq"]}
 }

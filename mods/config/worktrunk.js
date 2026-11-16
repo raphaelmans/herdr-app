@@ -19,12 +19,28 @@
 // Writer's choice changes (follow(), called from ./writer.js and ./main.js).
 
 import { div } from "gpui-kit";
-import { v_flex, h_flex, InputState, Input, TextareaState, Textarea, ScrollHandle } from "gpui-base";
-import { closeOverlay, exec, home, notify, props, readTextFile, run, setShared, shared, settings } from "herdr";
-import { toggle, tildify } from "./ui.js";
+import { v_flex, h_flex, Button, InputState, Input, TextareaState, Textarea, ScrollHandle } from "gpui-base";
+import { appHome, checking, closeOverlay, exec, home, notify, props, readTextFile, run, setShared, shared, settings } from "herdr";
+import * as fs from "fs/promises";
+import { toggle, tildify, waiting } from "./ui.js";
 import { edit } from "./toml.js";
 
 const FOLLOWS = "worktrunk.follows";
+const ENABLED = "worktrunk.enabled";
+const OFF = "Worktrunk is off. Turn it on in Config → Mods.";
+
+// Folder placement is the choice (ADR 0004). Shared state only tells other
+// open views about changes; it never authorizes wt without checking the folder.
+export async function enabled() {
+  const on = await fs.exists(`${appHome()}/mods/worktrunk/mod.json`);
+  if (shared(ENABLED) !== on) setShared(ENABLED, on);
+  return on;
+}
+
+async function requireEnabled() {
+  if (!(await enabled())) throw new Error(OFF);
+}
+
 const COMMAND = ["commit", "generation", "command"];
 const GUIDANCE = ["commit", "generation", "template-append"];
 const PATH = ["worktree-path"];
@@ -64,6 +80,7 @@ const same = (a, b) => (typeof a === "string" && typeof b === "string" ? a.trim(
 
 // What worktrunk reads: { path, config, exists } of the user config.
 async function report() {
+  await requireEnabled();
   let r;
   try { r = await exec("wt", ["config", "show", "--format", "json"], { cwd: home() }); }
   catch { throw new Error("worktrunk (wt) was not found on this computer."); }
@@ -85,6 +102,7 @@ async function apply(path, value) {
     const old = await readTextFile(state.path);
     const next = edit(old ?? "", section, key, want);
     if (next === (old ?? "")) return state;
+    await requireEnabled();
     const check = await exec("sh", ["-c", CHECK, "sh", next], { cwd: home() });
     let config = null;
     try { config = JSON.parse(check.stdout).user.config; } catch {}
@@ -92,6 +110,7 @@ async function apply(path, value) {
       throw new Error(`worktrunk could not read the change, so nothing was saved.\n${clean(check.stderr).split("\n").slice(1, 6).join("\n")}`);
     }
     if (!same(at(config, path), want)) throw new Error(`${state.path} sets ${path.join(".")} in a way this page can't change. Press e to edit the file.`);
+    await requireEnabled();
     const w = await exec("sh", ["-c", WRITE, "sh", state.path, next, old === null ? "new" : "old", old ?? ""]);
     if (w.code === 0) return { ...state, config, exists: true };
     if (w.code !== 3) throw new Error(clean(w.stderr) || `Could not write ${state.path}.`);
@@ -101,12 +120,13 @@ async function apply(path, value) {
 
 // Keeps worktrunk's commit writer equal to the Writer's choice, when it follows it.
 async function sync() {
+  if (!(await enabled())) return null;
   const command = () => shared("writer")?.command?.trim() || null;
   if (shared(FOLLOWS) !== true || !command()) return null;
   return apply(COMMAND, command);
 }
 export function follow(cx) {
-  if (shared(FOLLOWS) !== true) return;
+  if (checking()) return;
   cx.spawn(async () => {
     try { await sync(); }
     catch (e) { notify({ title: "Worktrunk's commit writer", body: String(e?.message ?? e), level: "error" }); }
@@ -118,6 +138,7 @@ export default class Worktrunk {
     this.host = host;
     this.scroll = ScrollHandle.new();
     this.state = null; // report()
+    this.enabled = null; // until the mod's folder is checked
     this.at = 0;
     this.error = "";
     this.typing = false;
@@ -126,7 +147,6 @@ export default class Worktrunk {
     this.own = false; // "Its own command" picked with no command yet
     this.custom = false; // "Custom" picked while the path is still a preset
     this.kept = ""; // the own command, while Nobody writes
-    this.hints = "j k g G move · space switch, or the next choice · ↵ type · e edit the file · r reread · saved as you change it";
     this.command = this.field(InputState.new({ placeholder: "reads the prompt on stdin, prints the message" }), COMMAND);
     this.path = this.field(InputState.new({ placeholder: BESIDE }), PATH);
     this.guidance = this.field(TextareaState.new({ placeholder: "- Use conventional commits (feat:, fix:, docs:, …)", rows: 2 }), GUIDANCE, true);
@@ -159,11 +179,24 @@ export default class Worktrunk {
     return field;
   }
 
-  start(cx) { this.reload(cx); }
+  get hints() {
+    return this.enabled === false ? "m open Mods · r reread"
+      : "j k g G move · space switch, or the next choice · ↵ type · e edit the file · r reread · saved as you change it";
+  }
+
+  start(cx) { if (!checking()) this.reload(cx); }
 
   reload(cx) {
     cx.spawn(async (cx) => {
       try {
+        this.enabled = await enabled();
+        if (!this.enabled) {
+          this.state = null;
+          this.error = "";
+          this.queue = [];
+          cx.notify();
+          return;
+        }
         this.state = (await sync()) ?? (await report());
         this.error = "";
       } catch (e) {
@@ -187,6 +220,7 @@ export default class Worktrunk {
 
   // One write at a time, in the order asked.
   save(path, value, cx) {
+    if (!this.enabled || shared(ENABLED) !== true) return;
     this.queue.push([path, value]);
     if (this.saving) return;
     this.saving = true;
@@ -301,6 +335,10 @@ export default class Worktrunk {
     if (this.typing) { if (e.key === "escape") { this.host.handle.focus(); cx.stop_propagation(); cx.notify(); } return true; }
     const char = e.key_char ?? e.key;
     if (char === "r") { this.reload(cx); return true; }
+    if (this.enabled === false) {
+      if (char === "m" || e.key === "enter") { this.host.show("mods", cx); return true; }
+      return false;
+    }
     if (!this.state) return false;
     const rows = this.rows().filter((r) => !r.group);
     if (e.key === "down" || char === "j") this.move(this.at + 1, cx);
@@ -354,6 +392,11 @@ export default class Worktrunk {
   }
 
   render(t) {
+    if (this.enabled === false) return v_flex().gap(8).px(4)
+      .child(div().font_semibold().child("Worktrunk is off"))
+      .child(div().text_color(t.muted).child("Turn it on in Mods to use worktrees in the Launcher and edit Worktrunk's settings."))
+      .child(h_flex().child(Button.new("worktrunk-open-mods").accessibility_label("Open Mods").px(10).py(6).rounded(6).bg(t.surface).text_color(t.foreground).cursor_pointer()
+        .hover((s) => s.bg(t.hover)).on_click((_e, cx) => this.host.show("mods", cx)).child("Open Mods  ·  m")));
     const rows = this.state ? this.rows() : [];
     const count = rows.filter((r) => !r.group).length;
     if (count) this.at = Math.min(this.at, count - 1);
@@ -363,8 +406,8 @@ export default class Worktrunk {
       .child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(r.note ?? ""));
     return v_flex().size_full().min_h(0).gap(6)
       .child(h_flex().flex_none().px(4).gap(8).text_size(11).text_color(t.dim)
-        .child(div().flex_1().min_w(0).truncate().child(this.state ? `${tildify(this.state.path)}${this.state.exists ? "" : " · not made yet, your first change makes it"}` : this.error ? "" : "Reading worktrunk's config…"))
-        .child(div().flex_none().child(this.saving ? "saving…" : "")))
+        .child(div().flex_1().min_w(0).truncate().child(this.state ? `${tildify(this.state.path)}${this.state.exists ? "" : " · not made yet, your first change makes it"}` : this.error ? "" : waiting(t, "Reading worktrunk's config")))
+        .child(div().flex_none().child(this.saving ? waiting(t, "Saving") : "")))
       .when(Boolean(this.error), (el) => el.child(div().flex_none().mx(4).p(8).rounded(8).border_1().border_color(t.blocked).text_size(12).text_color(t.blocked).child(this.error)))
       .child(v_flex().id("wt-rows").flex_1().min_h(0).gap(2).pr(12).overflow_y_scrollbar().track_scroll(this.scroll)
         .children(rows.map((r) => (r.group ? head(r) : this.row(t, r, ++i)))));

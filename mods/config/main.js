@@ -5,6 +5,7 @@
 //   Writer  ./writer.js  who writes short texts   shared "writer"
 //   Models  ./models.js  the model catalog        models.json, shared "models.synced"
 //   Worktrunk  ./worktrunk.js  worktrunk's own settings   ~/.config/worktrunk/config.toml
+//   Lific   ./lific.js   the Lific agent, and Lific's MCP   shared "lific.agent"
 //   Mods    ./mods.js    every mod, on or off     mods/ and mods-disabled/
 //   Curtain ./curtain.js no agents on the window  shared "curtain" (mods/curtain)
 //   Vaults  ./vaults.js  the connected vault      shared "vault"
@@ -15,9 +16,10 @@
 //
 // A page is a class: constructor(host), start(cx) (once, when first shown),
 // key(e, cx) (true when the key was its own), render(t), `hints`, and `typing`
-// (true while a text field of its has the keyboard). host is { handle, self }.
+// (true while a text field of its has the keyboard). host provides handle, self,
+// show(key, cx) to change page and changed(name, cx) after a mod's switch changes.
 //
-//   h l, tab / shift-tab, 1-8  change page      esc  close
+//   h l, tab / shift-tab, 1-9  change page      esc  close
 // Every page takes vim motions: j k move, g G first and last.
 //
 // Another mod opens it on a page: setShared("config.page", "writer"), then
@@ -25,6 +27,7 @@
 //
 // With props { role: "toggle" } it is the tab-bar button that opens this. That
 // copy also keeps the Writer's choice working on this machine (./writer.js),
+// the Lific agent's likewise (./lific.js),
 // worktrunk's commit writer equal to it when it follows it (./worktrunk.js),
 // the model catalog no more than a day old (./models.js), and looks once for
 // missing requirements (./health.js), which mark the button.
@@ -36,6 +39,7 @@ import Agents from "./agents.js";
 import Writer, { settle } from "./writer.js";
 import Models, { refresh } from "./models.js";
 import Worktrunk, { follow } from "./worktrunk.js";
+import Lific, { settle as settleLific } from "./lific.js";
 import Mods from "./mods.js";
 import Curtain from "./curtain.js";
 import Vaults from "./vaults.js";
@@ -48,12 +52,13 @@ const PAGES = [
   { key: "writer", name: "Writer", about: "writes commit summaries, worktree branch names and agent titles", page: Writer },
   { key: "models", name: "Models", about: "the model catalog, synced from models.dev", page: Models },
   { key: "worktrunk", name: "Worktrunk", about: "its commit writer, where worktrees go, what a merge does", page: Worktrunk },
+  { key: "lific", name: "Lific", about: "the agent that carries out Lific requests, and Lific's MCP", page: Lific },
   { key: "mods", name: "Mods", about: "what each is wired to, and a switch for ours", page: Mods },
   { key: "curtain", name: "Curtain", about: "takes every sign of agents off the window", page: Curtain },
   { key: "vaults", name: "Vaults", about: "the Obsidian vaults added here, and the connected one", page: Vaults },
   { key: "health", name: "Health", about: "what the mods need on this computer, and what is missing", page: Health },
 ];
-const AGENT_PAGES = ["agents", "writer", "models", "worktrunk"];
+const AGENT_PAGES = ["agents", "writer", "models", "worktrunk", "lific"];
 const hidden = (p) => Boolean(shared("curtain")?.on) && AGENT_PAGES.includes(p.key);
 
 // Escape is bound to an action of this mod's own: while a text field has the
@@ -65,7 +70,7 @@ export default class Config extends View {
     if (!escapeBound) { cx.bind_keys([{ keystroke: "escape", action: "config-escape", context: "ConfigDialog" }]); escapeBound = true; }
     this.role = props()?.role ?? "panel";
     if (this.role === "toggle") {
-      cx.spawn(async (cx) => { try { settle(await knownAgents()); } catch {} follow(cx); });
+      cx.spawn(async (cx) => { try { const agents = await knownAgents(); settle(agents); settleLific(agents); } catch {} follow(cx); });
       cx.spawn(async () => { await refresh(); });
       cx.spawn(async () => { await survey(); });
       cx.timer.every(6 * 3600_000, (cx) => { cx.spawn(async () => { await refresh(); }); });
@@ -84,9 +89,18 @@ export default class Config extends View {
     while (hidden(PAGES[this.at])) this.at = (this.at + step + PAGES.length) % PAGES.length;
     const { key, page } = PAGES[this.at];
     if (!this.made[key]) {
-      this.made[key] = new page({ handle: this.handle, self: SELF });
+      this.made[key] = new page({ handle: this.handle, self: SELF,
+        show: (key, cx) => this.show(PAGES.findIndex((p) => p.key === key), cx),
+        changed: (name, cx) => {
+          if (name === "worktrunk") {
+            if (this.made.worktrunk) this.made.worktrunk.reload(cx);
+            else follow(cx);
+          }
+          cx.spawn(async () => { await survey(); });
+        },
+      });
       this.made[key].start(cx);
-    }
+    } else if (key === "worktrunk") this.made[key].reload(cx);
     if (shared(PAGE) !== key) setShared(PAGE, key);
     this.handle.focus();
     cx.notify();

@@ -1,6 +1,6 @@
-// Pane move: sends the focused terminal pane to another tab, or breaks it out
-// into a tab of its own (tmux's join-pane / break-pane). ctrl-a t and ctrl-a !
-// in tmux-prefix.
+// Pane move: sends the focused terminal pane to another tab, in its own space
+// or another, or breaks it out into a tab of its own there (tmux's join-pane /
+// break-pane). ctrl-a t and ctrl-a ! in tmux-prefix.
 //
 // There is no app command for this. A terminal shows in the tab its
 // `herdr.space` / `herdr.tab` labels name, so the move is: park the terminal
@@ -15,11 +15,17 @@
 // Terminal panes only (a mod pane has no terminal to relabel), and only to
 // tabs on the pane's own machine. Moving a tab's only pane closes that tab.
 
-import { View, div } from "gpui-kit";
+import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, ScrollHandle } from "gpui-base";
 import { closeOverlay, exec, focused, hc, notify, panes, props, run, shared, spaces, theme } from "herdr";
 
+// A wait: one spinner, turned natively, and what is being waited for.
+const waiting = (t, label) => h_flex().gap(8).items_center().child(svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900)).child(label);
+
 const ROW = 30;
+// A popup is as tall as its content, so the list is given its height: its
+// rows, up to this many, then it scrolls.
+const SHOWN = 12;
 // Labels use the ids of the terminal's own machine: no "<machine>/" prefix.
 const bare = (id) => id.slice(id.lastIndexOf("/") + 1);
 const newTabId = () => `tb${Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join("")}`;
@@ -70,17 +76,19 @@ export default class PaneMove extends View {
     if (id) closeOverlay(id);
   }
 
-  // "New tab" first (when it would change anything), then this space's other
-  // tabs, then the other spaces' on the same machine.
+  // This space first, then the others on the same machine; in each, "New tab"
+  // (here only when it would change anything) and then its tabs.
   targets() {
     const { space, tab } = this.from;
     const hidden = new Set((shared("spaces.sections")?.sections ?? []).filter((s) => s.hidden).flatMap((s) => s.members));
-    const rows = tab.panes > 1 ? [{ kind: "new", text: "New tab", hint: space.name }] : [];
+    const rows = [];
     const ordered = [space, ...spaces().filter((s) => s.id !== space.id && s.machine === space.machine)];
     for (const s of ordered.filter((s) => !hidden.has(s.id))) {
+      const here = s.id === space.id;
+      if (!here || tab.panes > 1) rows.push({ kind: "new", space: s, text: "New tab", hint: here ? "this space" : s.name });
       for (const t of s.tabs) {
         if (t.id === tab.id) continue;
-        rows.push({ kind: "tab", space: s, tab: t, text: t.name, hint: s.id === space.id ? "this space" : s.name });
+        rows.push({ kind: "tab", space: s, tab: t, text: t.name, hint: here ? "this space" : s.name });
       }
     }
     const q = this.query.trim().toLowerCase();
@@ -91,8 +99,10 @@ export default class PaneMove extends View {
     if (this.busy) return;
     const terminal = this.terminal;
     const { space, tab } = this.from;
-    const to = target.kind === "new" ? { space: space.id, tab: newTabId() } : { space: target.space.id, tab: target.tab.id };
-    this.busy = target.kind === "new" ? "a new tab" : target.text;
+    const dest = target.space ?? space;
+    const to = { space: dest.id, tab: target.kind === "new" ? newTabId() : target.tab.id };
+    const where = dest.id === space.id ? "" : ` in ${dest.name}`;
+    this.busy = `${target.kind === "new" ? "a new tab" : target.text}${where}`;
     cx.notify();
     // The overlay stays open until the move is over: closing cancels this task.
     cx.spawn(async () => {
@@ -167,24 +177,24 @@ export default class PaneMove extends View {
     const rows = this.targets();
     if (this.at >= rows.length) this.at = Math.max(0, rows.length - 1);
     const body = this.busy
-      ? div().py(24).text_color(t.muted).child(`Moving to ${this.busy}…`)
+      ? div().py(24).text_color(t.muted).child(waiting(t, `Moving to ${this.busy}`))
       : rows.length === 0
-        ? div().py(24).text_color(t.muted).child(this.query ? "No tab matches." : "There is no other tab to move it to.")
-        : v_flex().id("pm-list").flex_1().min_h(0).overflow_y_scrollbar().track_scroll(this.scroll).children(rows.map((r, i) =>
-          h_flex().id(`pm-${i}`).h(ROW).flex_none().px(10).gap(10).items_center().rounded(7).cursor_pointer()
+        ? div().py(24).text_color(t.muted).child(this.query ? "No tab matches." : "There is nowhere else to move it to.")
+        : v_flex().id("pm-list").h(Math.min(rows.length, SHOWN) * ROW).flex_none().overflow_y_scrollbar().track_scroll(this.scroll).children(rows.map((r, i) =>
+          h_flex().id(r.kind === "new" ? `pm-new-${r.space.id}` : `pm-${r.tab.id}`).h(ROW).flex_none().px(10).gap(10).items_center().rounded(7).cursor_pointer()
             .bg(i === this.at ? t.selected : "#00000000").hover((s) => s.bg(i === this.at ? t.selected : t.hover))
             .on_click((_e, cx) => this.move(r, cx))
             .child(div().w(14).text_color(t.accent).child(r.kind === "new" ? "+" : ""))
             .child(div().flex_1().min_w(0).truncate().text_color(t.foreground).child(r.text))
             .child(div().flex_none().max_w(200).truncate().text_color(t.dim).text_size(11.5).child(r.hint))));
     return v_flex().id("pane-move").track_focus(this.handle).on_key_down((e, cx) => this.key(e, cx))
-      .size_full().min_h(0).p(16).gap(10).bg(t.popover).text_size(13)
+      .w_full().p(16).gap(10).bg(t.popover).text_size(13)
       .child(h_flex().items_center()
         .child(div().flex_1().text_size(15).font_semibold().text_color(t.foreground).child("Move pane to…"))
         .child(div().text_size(11).text_color(t.dim).child(this.search ? "↑↓ choose · ↵ move · esc back" : "j k choose · g G ends · / search · ↵ move · esc")))
       .when(this.search, (el) => el.child(h_flex().h(34).flex_none().px(10).gap(8).items_center().rounded(8).border_1().border_color(t.accent).bg(t.background)
         .child(div().text_color(t.accent).child("/"))
-        .child(div().text_color(this.query ? t.foreground : t.dim).child(this.query || "filter tabs"))))
+        .child(div().text_color(this.query ? t.foreground : t.dim).child(this.query || "filter tabs and spaces"))))
       .child(body);
   }
 }

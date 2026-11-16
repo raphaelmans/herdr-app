@@ -63,6 +63,23 @@ printf '%s' "$standard" > "$tmp/standard"
 jq -r 'to_entries[] | [.key, (if .value.app then "app" else "bin" end),
   ((.value.app // .value.bin) | sub("^~"; env.HOME)), (.value.flag // "" | if . == "" then "-" else . end)] | join("|")' "$catalog" > "$tmp/list" || exit 2
 
+# A personal bin directory may link to its owner's installation. Follow links
+# for ownership without losing the PATH entry that actually launches the tool.
+resolve_path() (
+  path=$1; links=0
+  while [ -L "$path" ]; do
+    [ "$links" -lt 40 ] || exit 1
+    target=$(readlink "$path") || exit 1
+    case "$target" in
+      /*) path=$target ;;
+      *) path=$(dirname "$path")/$target ;;
+    esac
+    links=$((links + 1))
+  done
+  directory=$(cd -P "$(dirname "$path")" && pwd) || exit 1
+  printf '%s/%s\n' "$directory" "$(basename "$path")"
+)
+
 while IFS='|' read -r id kind where flag; do
   (
     if [ "$kind" = app ]; then
@@ -70,7 +87,8 @@ while IFS='|' read -r id kind where flag; do
     else
       p=$(command -v "$where" 2>/dev/null) || exit 0
       v=""; [ "$flag" != "-" ] && v=$("$where" "$flag" 2>&1 </dev/null | head -n 1)
-      printf '%s\t%s\t%s\n' "$id" "$p" "$v"
+      resolved=$(resolve_path "$p") || resolved=""
+      printf '%s\t%s\t%s\t%s\n' "$id" "$p" "$v" "$resolved"
     fi
   ) > "$tmp/$id.out" 2>/dev/null &
 done < "$tmp/list"
@@ -83,7 +101,7 @@ rows=$(jq -n --slurpfile catalog "$catalog" --argjson specs "$specs" --rawfile f
   | ($standard[0] | map(select((.command // "") != "" and (.requires_verification | not) and (.owner | IN("mise", "brew", "pacman")))
       | {key: .command, value: {owner: .owner, fix: (if .owner == "mise" then "mise use --global \(.spec)@\(.pin)" elif .owner == "brew" then "brew install \(.spec)" else "sudo pacman -S --needed \(.spec)" end)}})
      | from_entries) as $std
-  | ($found | split("\n") | map(select(length > 0) | split("\t")) | map({key: .[0], value: {path: (.[1] // ""), said: (.[2] // "")}}) | from_entries) as $hit
+  | ($found | split("\n") | map(select(length > 0) | split("\t")) | map({key: .[0], value: {path: (.[1] // ""), said: (.[2] // ""), resolved: (.[3] // "")}}) | from_entries) as $hit
   # $asks: every (mod, requirement, needed) a spec states, "for" included when that mod is on;
   # $unknown: one no catalog entry describes
   | [ $specs[] | .mod as $m | .spec as $s
@@ -104,7 +122,7 @@ rows=$(jq -n --slurpfile catalog "$catalog" --argjson specs "$specs" --rawfile f
           version: (([ $h.said | scan("[0-9]+\\.[0-9]+(?:\\.[0-9]+)?") ] | first) // ""),
           state: ( if ($r.all == null) and ($users | length) == 0 then "off"
                    elif $h.path == "" then (if $needed then "missing" else "extra" end)
-                   elif $r.owner == "mise" and ($h.path | test("/mise/") | not) then "route"
+                   elif $r.owner == "mise" and ([$h.path, ($h.resolved // "")] | any(test("/mise/")) | not) then "route"
                    else "ok" end ) } ]
   | { rows: ., unknown: $unknown, standard: (if $from == "" then null else $from end) }') || { echo "health.sh: could not read the specs" >&2; exit 2; }
 

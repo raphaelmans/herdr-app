@@ -39,6 +39,9 @@ import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex, ScrollHandle, InputState, Input } from "gpui-base";
 import { agents, closeOverlay, exec, focused, nextCommand, notify, panes, props, run, setShared, settings, shared, spaces, terminals, theme } from "herdr";
 
+// A wait: one spinner, turned natively, and what is being waited for.
+const waiting = (t, label) => h_flex().gap(8).items_center().child(svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900)).child(label);
+
 const LINES = 160;       // history pulled into the preview
 const PULL_LINES = 120;  // what "pull" and "copy" hand over
 const REFRESH_MS = 2000;
@@ -366,7 +369,8 @@ export default class AgentHub extends View {
       .child(div().px(12).py(7).flex_none().border_t(1).border_color(t.border).text_size(10.5).text_color(t.dim)
         .child(this.typing ? "↑ ↓ select · ↵ keep filter · esc leave field" : `j k ↑ ↓ select · / search${this.query ? " · esc clear" : ""}`));
 
-    const lines = cur ? (this.text[cur.address] ?? "Reading…").split("\n") : [];
+    const unread = Boolean(cur) && this.text[cur.address] === undefined;
+    const lines = cur && !unread ? this.text[cur.address].split("\n") : [];
     const right = v_flex().flex_1().min_w(0).h_full()
       .child(h_flex().px(12).h(38).flex_none().gap(8).items_center().border_b(1).border_color(t.border)
         .child(cur ? logo(cur.program, 16, t) : div())
@@ -378,7 +382,7 @@ export default class AgentHub extends View {
       .child(div().relative().flex_1().min_h(0).bg(t.background)
         .child(v_flex().id("ah-screen").absolute().inset_0().px(12).py(8).overflow_y_scrollbar().track_scroll(this.scroll)
           .font_family(mono).text_size(11.5).text_color(t.foreground)
-          .children(lines.map((l, i) => div().id(`ln-${i}`).flex_none().whitespace_nowrap().child(l || " ")))))
+          .when(unread, (e) => e.child(waiting(t, "Reading output"))).children(lines.map((l, i) => div().id(`ln-${i}`).flex_none().whitespace_nowrap().child(l || " ")))))
       .child(h_flex().px(10).h(44).flex_none().gap(8).items_center().border_t(1).border_color(t.border)
         .child(button("ah-send", "Message", "↵", true, () => this.message()))
         .child(button("ah-pull", this.home ? `Pull into ${short(this.home.label, 16)}` : "Pull", "p", false, (cx) => this.pull(cx)))

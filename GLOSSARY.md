@@ -94,6 +94,32 @@ _Avoid_: cancel, dismiss, close (for Escape in general)
 A field for writing text that is sent or saved, longer than a name or a search: a first message, a message in the send box, a comment, an annotation. Enter and Shift+Enter start a new line in it; only Cmd+Enter sends or saves. A short field (a name, a branch, a commit summary, a search) keeps Enter.
 _Avoid_: textarea, input, prompt (Herdr's naming dialog), editor
 
+### Waiting and reading
+
+**Waiting indicator**:
+The turning spinner and the words for what is being waited for ("Reading worktrees"), drawn where the result will land.
+_Avoid_: loading, busy text, progress bar
+
+**Typing pause**:
+How long a search or suggestion list waits after the last key before it runs. What was on screen stays meanwhile.
+_Avoid_: debounce (in labels and docs), delay, lag
+
+**Settle**:
+A selection coming to rest long enough for its detail to be read. A selection passed over on the way is never read.
+_Avoid_: hover, debounce, idle
+
+**Kept read**:
+What a mod read from a program and holds on to, so showing it again needs no new read until it is old or `r` is pressed.
+_Avoid_: cache (in labels), snapshot, memo
+
+**Overtaken read**:
+A read whose answer is no longer wanted because the selection, folder or window moved on before it came back. It is dropped without a trace.
+_Avoid_: stale read, cancelled read, race
+
+**Combo box**:
+A field that filters a popup of choices under it, for a list too long to show inline, such as worktrees or sprints.
+_Avoid_: dropdown, select, picker (Herdr's space picker), autocomplete
+
 ### Starting things
 
 **Prefix**:
@@ -194,8 +220,12 @@ The one order agents are listed in, wherever they are listed: pinned agents firs
 _Avoid_: sort (that is the choice behind the order), ranking, priority
 
 **Agent row**:
-One agent in a list of agents: its title on the first line, and under it, quieter, its tab badge and its space.
+One agent in a list of agents: its title on the first line, and under it, quieter, its space mark, its tab badge and its space.
 _Avoid_: entry, item, card
+
+**Space mark**:
+A space's first letter on the space's own color, in a small rounded square, so a space can be told apart at a glance wherever it is listed.
+_Avoid_: favicon, avatar, space icon, logo
 
 **Tab badge**:
 A tab's number in its space, drawn as a small box so it can be matched to the tab bar at a glance.
@@ -235,6 +265,14 @@ _Avoid_: fetch, import, context (as a verb)
 Giving one item from a mod, such as an issue, to the pane you came from as the start of a message.
 _Avoid_: send, assign, pull
 
+**Lific request**:
+What the person asks to be done in Lific, in their own words: a new issue, a status, a comment. It is typed in the Lific window's request box and works in the project shown there, unless the words name another.
+_Avoid_: message (that is between agents), command, prompt, chat
+
+**Lific agent**:
+The agent and model chosen to carry out Lific requests. It is started once per request and can reach nothing but Lific's own tools. It is a separate choice from the Writer, which only writes.
+_Avoid_: Writer (that one has no tools), bot, assistant, MCP (that is how it reaches Lific)
+
 ### Text written for you
 
 **Writer**:
@@ -253,7 +291,30 @@ _Avoid_: commit summary (for the whole text)
 An ordered list of commits and what to do with each: keep, reword, edit, squash, fix up or drop. Reviewing a plan does not change history; applying it does.
 
 **Custom patch**:
-Selected changed lines or hunks from one commit, collected across its files. It can be applied, reversed, removed from that commit or split into a new commit.
+Selected files, hunks or changed lines from a commit or comparison. It can be applied or reversed; a patch from one local commit can also be removed from that commit or split into a new commit.
+
+**List range**:
+A continuous set of selected rows in a Git list. A sticky range stays active during normal movement; a nonsticky range ends when normal movement resumes.
+
+**Commit details**:
+A commit's full identity, authorship, message and changed files, opened beneath its row in the Git graph.
+
+**Reference badge**:
+A branch, remote branch, tag or stash label on a commit in the Git graph. A local branch and its matching remotes can share one badge, with each segment selecting its own reference.
+
+### GitHub
+
+**Organization**:
+A GitHub organization the account signed in on this computer belongs to. The Pull requests window lists the repositories of the one selected.
+_Avoid_: org, team, account (the account is who is signed in on this computer)
+
+**Pull request**:
+A proposed change GitHub has in one repository of the selected organization.
+_Avoid_: pull (that is bringing another agent's output), PR
+
+**Pull requests**:
+The window that lists an organization's repositories and the pull requests of the repository selected.
+_Avoid_: GitHub panel, pulls, prs
 
 ### The window
 

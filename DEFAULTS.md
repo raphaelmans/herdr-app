@@ -32,6 +32,8 @@ Off means the folder is in `mods-disabled/<name>`; on means it is in `mods/<name
 
 To put one back: `mv mods/jira mods-disabled/jira` (off), or the reverse (on). Config → Mods does the same with a switch. Shipped mods have no switch; Herdr restores them on every start.
 
+Worktrunk is on (`true`) on a new machine, so Health requires `wt` there. Its switch controls the Launcher's worktree option, Config's Worktrunk settings and Writer sync, and whether Health requires `wt`. Its own config file and the saved `worktrunk.follows` choice are kept while off. `worktrunk.enabled` is only a cached reading of the folder's placement; neither that cache nor `worktrunk.follows: true` turns the mod on.
+
 ## 3. Layout
 
 Default: `mine` (my layout).
@@ -48,8 +50,9 @@ These live in `shared.json`, which git does not hold. "Absent" means the key is 
 |---|---|---|---|
 | Agent shortlist | `agents.shortlist` | `["claude","codex"]` (absent: every installed agent) | Config → Agents |
 | Writer | `writer` | Claude Code with `claude-haiku-5-5`; Codex's model `gpt-6-luna` | Config → Writer |
+| Lific agent | `lific.agent` | Claude Code with `claude-haiku-5-5` | Config → Lific |
 | Starred models | `models.starred` | claude: `claude-opus-5-5`, `claude-fable-5-2`; codex: `gpt-6.1-sol`, `gpt-6-astra` | Config → Models |
-| Worktrunk follows the Writer | `worktrunk.follows` | `true` (absent: not following) | Config → Worktrunk |
+| Worktrunk follows the Writer | `worktrunk.follows` | `true` while the mod is on (absent: not following); does nothing while off | Config → Worktrunk |
 | Curtain | `curtain` | lifted (`on: false`) | Config → Curtain |
 | Vaults | `vaults` | none | Config → Vaults |
 | Connected vault | `vault` | none | Config → Vaults |
@@ -70,21 +73,23 @@ cd ~/.config/herdr-app && cp shared.json shared.json.before-reset && jq '
   | .["models.starred"] = {"claude":["claude-opus-5-5","claude-fable-5-2"],"codex":["gpt-6.1-sol","gpt-6-astra"]}
   | .["worktrunk.follows"] = true
   | .["workspace.panels"] = []
-  | del(.writer, .curtain, .vault, .vaults, .["spaces.sections"], .["space.colors"])
+  | del(.writer, .["lific.agent"], .curtain, .vault, .vaults, .["spaces.sections"], .["space.colors"])
 ' shared.json.before-reset > shared.json
 ```
 
-`writer` is deleted rather than written: on the next start Config settles it to Claude Code with `claude-haiku-5-5`, and builds the command for this machine. Check it on Config → Writer afterwards.
+`writer` is deleted rather than written: on the next start Config settles it to Claude Code with `claude-haiku-5-5`, and builds the command for this machine. Check it on Config → Writer afterwards. `lific.agent` is settled the same way; check it on Config → Lific.
 
-Not choices, so leave them alone: `layout`, `health`, `config.page`, `agents.order`, `models.synced`, `pane-geo`, and anything starting `viz.`, `send-box.`, `skillshare.`, `win98.` or `frame.`. The mods rewrite these as they run.
+Not choices, so leave them alone: `layout`, `health`, `config.page`, `agents.order`, `models.synced`, `worktrunk.enabled`, `pane-geo`, `lific.ask`, `lific.ack`, and anything starting `viz.`, `send-box.`, `skillshare.`, `win98.` or `frame.`. The mods rewrite these as they run.
 
 ## 5. Each mod's own memory
 
-`data/<mod>/store*.json` holds what one mod remembers (Lific's project per space, the Jira board's filter and scope). The default is no file:
+`data/<mod>/store*.json` holds what one mod remembers (Lific's project per space, the Jira board's filter and scope, the Pull requests window's organization and what it read last). The default is no file:
 
 ```sh
 rm -rf ~/.config/herdr-app/data/jira     # that mod starts fresh the next time it opens
 ```
+
+Git's graph keeps its details file view per repository and machine under `herdr.git.graph:<machine-and-root>` in its own store. The default is a file tree. It also stores a divider ratio, default `0.5` and bounded to `0.2`–`0.8`; live divider dragging and restoration remain unverified (see `mods/git/PARITY.md`). These are view state, not shared Config choices.
 
 ## 6. Requirements
 

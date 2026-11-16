@@ -11,7 +11,7 @@
 import { div, svg, image } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { focused, knownAgents, setShared, shared, spaces } from "herdr";
-import { heading, box, SHORTLIST } from "./ui.js";
+import { heading, box, SHORTLIST, waiting } from "./ui.js";
 
 const chosen = () => { const keys = shared(SHORTLIST); return Array.isArray(keys) && keys.length ? keys : null; };
 
@@ -70,7 +70,7 @@ export default class Agents {
     const count = agents.filter((a) => this.offered(a.key)).length;
     return v_flex().size_full().min_h(0).gap(10)
       .child(h_flex().flex_none().items_end()
-        .child(heading(t, "INSTALLED", this.agents ? this.where : "checking what is installed…").flex_1())
+        .child(heading(t, "INSTALLED", this.agents ? this.where : waiting(t, "Checking what is installed")).flex_1())
         .child(div().flex_none().px(4).text_size(11).text_color(t.dim).child(!this.agents ? "" : keys ? `${count} of ${agents.length} offered` : "all offered")))
       .child(v_flex().id("agent-rows").flex_1().min_h(0).gap(2).overflow_y_scroll().children(agents.map((a, i) => {
         const on = this.offered(a.key), at = i === this.at;

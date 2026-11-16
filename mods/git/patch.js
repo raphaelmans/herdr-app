@@ -75,19 +75,21 @@ export function selectedPatch(patch, path, rows, reverse = false) {
   return out.join("\n") + "\n";
 }
 
-export function parseConflicts(text) {
+export function parseConflicts(text, markerSize = 7) {
   const lines = text.match(/[^\n]*\n|[^\n]+$/g) ?? [], conflicts = [];
+  const size=Number.isSafeInteger(markerSize)&&markerSize>0?markerSize:7;
+  const begin=new RegExp(`^<{${size}} `), baseMark=new RegExp(`^\\|{${size}} `), split=new RegExp(`^={${size}}\\r?\\n?$`), end=new RegExp(`^>{${size}} `);
   let start = -1, base = -1, middle = -1;
   for (let i = 0; i < lines.length; i++) {
-    if (/^<{7,} /.test(lines[i])) { start = i; base = -1; middle = -1; }
-    else if (start >= 0 && /^\|{7,} /.test(lines[i])) base = i;
-    else if (start >= 0 && /^={7,}\r?\n?$/.test(lines[i])) middle = i;
-    else if (start >= 0 && middle >= 0 && /^>{7,} /.test(lines[i])) {
+    if (begin.test(lines[i])) { start = i; base = -1; middle = -1; }
+    else if (start >= 0 && baseMark.test(lines[i])) base = i;
+    else if (start >= 0 && split.test(lines[i])) middle = i;
+    else if (start >= 0 && middle >= 0 && end.test(lines[i])) {
       conflicts.push({ start, end: i, ours: lines.slice(start + 1, base >= 0 ? base : middle).join(""), theirs: lines.slice(middle + 1, i).join("") });
       start = -1;
     }
   }
-  return { text, lines, conflicts };
+  return { text, lines, conflicts, markerSize:size };
 }
 
 export function resolveConflict(parsed, index, side) {

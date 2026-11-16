@@ -5,7 +5,9 @@
 // Four groups of rows:
 //   Programs  each requirement: found or not, where, its version, and whether
 //             its owner (mise, the system, its own installer) put it there
-//   Agents    Herdr's installed agents, and the program the Writer runs
+//   Agents    Herdr's installed agents, the program the Writer runs, and for
+//             Lific requests: the Lific agent's program and an MCP handshake
+//             with `lific mcp` (./lific.js)
 //   Herdr     what `herdr-app status` reports from files and mods
 //   Wiring    keys and the layout on screen that name a mod that is not there
 // A requirement is needed (its mods' main job stops without it) or extra (one
@@ -24,8 +26,9 @@
 import { div } from "gpui-kit";
 import { v_flex, h_flex, ScrollHandle } from "gpui-base";
 import { appHome, commands, exec, home, keys, knownAgents, notify, readTextFile, setShared, shared } from "herdr";
-import { chip, tildify } from "./ui.js";
+import { chip, tildify, waiting } from "./ui.js";
 import { dirs, layoutMods } from "./mods.js";
+import { handshake, LIFIC_AGENT } from "./lific.js";
 
 export const HEALTH = "health";
 const TOLD = "health.told";
@@ -66,7 +69,25 @@ async function programs() {
   return { rows, writer: { program: writer, path: where } };
 }
 
-async function agentRows(writer) {
+// Lific requests (made in the Lific window, mods/lific) need two things no program row shows:
+// Lific's MCP answering, and the program the Lific agent runs.
+async function lificRows() {
+  const chosen = shared(LIFIC_AGENT), runs = program(chosen?.command);
+  const [mcp, where] = await Promise.all([
+    handshake(),
+    runs ? exec("sh", ["-c", 'command -v "$1"', "sh", runs], { cwd: home(), timeout: 5000 }).then((r) => r.stdout.trim()).catch(() => "") : "",
+  ]);
+  const rows = [];
+  // With lific itself not here, its Programs row already says so.
+  if (mcp.ok) rows.push({ group: "agents", state: "ok", name: "Lific MCP", tag: `${mcp.tools} tools · ${mcp.version}`, text: "lific mcp answers a handshake over stdio  —  what the Lific agent acts through", fix: null });
+  else if (!mcp.absent) rows.push({ group: "agents", state: "missing", name: "Lific MCP", tag: "needed", text: `${mcp.text}. Without it, no Lific request is carried out.`, fix: "lific doctor" });
+  rows.push(where
+    ? { group: "agents", state: "ok", name: "Lific agent", tag: runs, text: `${chosen?.label ? `${chosen.label}  —  ` : ""}carries out Lific requests`, fix: null }
+    : { group: "agents", state: "extra", name: "Lific agent", tag: "extra", text: runs ? `It runs ${runs}, which is not found: no Lific request is carried out.` : "None is chosen yet: no Lific request is carried out.", fix: "Choose one on the Lific page" });
+  return rows;
+}
+
+async function agentRows(writer, lific) {
   const rows = [];
   try {
     const installed = (await knownAgents()).filter((a) => a.installed);
@@ -82,6 +103,7 @@ async function agentRows(writer) {
       ? { group: "agents", state: "ok", name: "Writer", tag: writer.program, text: `${label ? `${label}  —  ` : ""}commit summaries, branch names and agent titles`, fix: null }
       : { group: "agents", state: "extra", name: "Writer", tag: "extra", text: `It runs ${writer.program}, which is not found: no commit summaries, branch names or agent titles are written.`, fix: "Choose another on the Writer page" });
   }
+  rows.push(...lific);
   return rows;
 }
 
@@ -130,8 +152,10 @@ async function wiringRows(on, off) {
 async function check() {
   const root = appHome();
   const [on, off] = await Promise.all([dirs(`${root}/mods`), dirs(`${root}/mods-disabled`)]);
-  const [prog, herdr, wiring] = await Promise.all([programs(), herdrRows(), wiringRows(on, off)]);
-  const agents = shared("curtain")?.on ? [] : await agentRows(prog.writer);
+  const curtain = shared("curtain")?.on;
+  // The Lific handshake needs nothing from the program checks, so it runs beside them.
+  const [prog, herdr, wiring, lific] = await Promise.all([programs(), herdrRows(), wiringRows(on, off), !curtain && on.includes("lific") ? lificRows() : []]);
+  const agents = curtain ? [] : await agentRows(prog.writer, lific);
   return [...prog.rows, ...agents, ...herdr, ...wiring];
 }
 
@@ -159,7 +183,7 @@ export async function survey() {
 
 const GROUPS = [
   ["programs", "PROGRAMS", "what the mods run on this computer"],
-  ["agents", "AGENTS", "the ones Herdr found, and who writes for you"],
+  ["agents", "AGENTS", "the ones Herdr found, and who writes and acts for you"],
   ["herdr", "HERDR", "what the app reports from its files and mods"],
   ["wiring", "WIRING", "keys and the layout on screen"],
 ];
@@ -260,7 +284,7 @@ export default class Health {
     const rows = this.rows ?? [];
     const missing = names(rows, "missing").length, extra = names(rows, "extra").length, fine = names(rows, "ok").length, route = names(rows, "route").length;
     const routed = route ? ` · ${route} off ${route === 1 ? "its" : "their"} route` : "";
-    const summary = !this.rows ? "Looking for what the mods need…"
+    const summary = !this.rows ? waiting(t, "Looking for what the mods need")
       : missing ? `${missing} needed ${missing === 1 ? "thing is" : "things are"} missing${extra ? `, ${extra} extra` : ""}${routed} · ${fine} fine`
       : extra ? `Everything needed is here · ${extra} extra missing${routed} · ${fine} fine`
       : `Everything is here${routed} · ${fine} fine`;
@@ -272,7 +296,7 @@ export default class Health {
     return v_flex().size_full().min_h(0).gap(6)
       .child(h_flex().flex_none().px(4).gap(8).items_center()
         .child(div().flex_1().min_w(0).truncate().text_color(missing ? t.blocked : extra || route ? t.ansi3 : this.rows ? t.ansi2 : t.dim).child(summary))
-        .child(div().flex_none().text_size(11).text_color(t.dim).child(this.busy ? "checking…" : this.only ? "only what is missing" : "")))
+        .child(div().flex_none().text_size(11).text_color(t.dim).child(this.busy && this.rows ? waiting(t, "Checking") : this.only ? "only what is missing" : "")))
       .child(v_flex().id("health-list").flex_1().min_h(0).gap(2).overflow_y_scrollbar().track_scroll(this.scroll)
         .children(this.entries().map((e) => (e.row ? this.row(t, e.row, e.i) : heading(e.group))))
         .when(Boolean(this.rows) && !this.listed().length, (el) => el.child(div().px(10).py(8).text_color(t.dim).child("Nothing is missing."))))

@@ -1,0 +1,3 @@
+{ "place": "none", "title": "Pull requests", "focusable": true, "overlay": { "kind": "window", "key": "pull-requests", "width": 1180, "height": 740 },
+  "spec": {"needs": ["gh"]}
+}

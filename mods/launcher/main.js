@@ -17,14 +17,32 @@
 // Default passes no override. Only agents with a known reasoning flag offer it.
 // A new tab or space also offers its folder, to edit before it is made (f) or
 // choose in the system's folder picker (p, this computer only): untouched, it
-// starts where Herdr would put it anyway. A split stays in its tab's folder.
+// starts where Herdr would put it anyway. A split stays in its tab's folder,
+// unless it is started in a worktree: the worktree choice is offered for a
+// new tab, split and space alike, for a plain terminal as for an agent.
+// While editing the folder, arrows / Ctrl+J/K choose a directory and Tab
+// completes it, keeping the field focused for the next path component.
 // Fork uses this same picker with props { fork: { pane, terminal, key, name,
 // canFork } }. Only agents are offered. Selection goes back to agent-fork:
 // the same CLI forks natively; another receives a handover through hc send.
 
 import { View, div, svg, image } from "gpui-kit";
-import { v_flex, h_flex, InputState, Input, TextareaState, Textarea, ScrollHandle } from "gpui-base";
+import { v_flex, h_flex, InputState, Input, TextareaState, Textarea, ScrollHandle, Popup } from "gpui-base";
 import { appHome, checking, closeOverlay, exec, focused, home, knownAgents, notify, openOverlay, panes, pickFolder, props, readTextFile, run, setShared, shared, spaces, theme, writeTextFile } from "herdr";
+import * as fs from "fs/promises";
+
+// Off is a folder in mods-disabled/, including on a fresh machine. Shared
+// state updates open views, but every wt operation checks the folder itself.
+async function worktrunkEnabled() {
+  const on = await fs.exists(`${appHome()}/mods/worktrunk/mod.json`);
+  if (shared("worktrunk.enabled") !== on) setShared("worktrunk.enabled", on);
+  return on;
+}
+const WORKTRUNK_OFF = "Worktrunk is off. Turn it on in Config → Mods.";
+import { folderSuggestions } from "./folders.js";
+
+// A wait: one spinner, turned natively, and what is being waited for.
+const waiting = (t, label) => h_flex().gap(8).items_center().child(svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900)).child(label);
 
 const KNOWN = "new-menu.agents"; // the + menu's last look, shown while we check again
 // The agent shortlist (the Config dialog's Agents page): the agent keys this machine offers. None,
@@ -105,13 +123,51 @@ osascript -e 'on run argv' -e 'set d to the clipboard as «class PNGf»' -e 'set
 rm -f "$f"; exit 1`;
 const RESOLVE = 'p=$1; case $p in "~") p=$HOME ;; "~/"*) p=$HOME/${p#"~/"} ;; esac; cd "$p" 2>/dev/null && pwd';
 
+// The repository each folder given is in, once each: its main checkout (or the
+// bare repository itself). Folders outside any repository print nothing.
+const REPOS = `for d do
+  c=$(CDPATH= cd "$d" 2>/dev/null && git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || continue
+  case $c in */.git) c=\${c%/.git} ;; esac
+  [ -n "$c" ] && printf '%s\\n' "$c"
+done | awk '!seen[$0]++'`;
+const NO_REPO = /not a git repository/i;
+// `pane.split` takes no folder, so a split in a worktree is started through
+// this: it goes there, then becomes the agent given, or the person's shell.
+const IN = 'cd "$1" || exit 1; shift; [ "$#" -gt 0 ] && exec "$@"; exec "${SHELL:-/bin/sh}" -l';
+// `wt list` reduced to what the combo box draws, before the mod reads it (ADR 0006):
+// [[branch, checkout path or null, main, here], ...]. Older wt prints an array;
+// current releases wrap it in schema 2 and keep checkout facts under worktree.
+const LIST = `out=$(wt list --format json --branches) || exit 1
+printf %s "$out" | jq -c '[(if type == "array" then . elif .schema == 2 then .items else error("wt list returned an unsupported JSON format.") end)[] | select(.branch) | [.branch, (.worktree.path // (if .kind == "worktree" then .path else null end)), (.worktree.main // .is_main // false), (.worktree.current // .is_current // false)]]'`;
+// Kept reads (ADR 0009), by machine and folder: the least recently used is
+// dropped past LISTS_KEPT. One younger than LIST_FRESH is used as it is; an
+// older one is shown at once while a fresh read replaces it. No cheap mark
+// says a repository's branches changed, so age decides.
+const LISTS = new Map();
+const LISTS_KEPT = 12;
+const LIST_FRESH = 30_000;
+const LIST_READS = new Map(); // key -> the read running for it: never two at once
+const keep = (key, value) => {
+  LISTS.delete(key);
+  LISTS.set(key, value);
+  while (LISTS.size > LISTS_KEPT) LISTS.delete(LISTS.keys().next().value);
+};
+const WORKTREES_SHOWN = 100; // options drawn at most: typing narrows the rest
+
 // Escape is bound to an action of this mod's own: while a text field has the
 // keyboard, Herdr closes the dialog on Escape before any key handler here sees it.
 let escapeBound = false;
 
 export default class Launcher extends View {
   init(_props, cx) {
-    if (!escapeBound) { cx.bind_keys([{ keystroke: "escape", action: "launcher-escape", context: "Launcher" }]); escapeBound = true; }
+    if (!escapeBound) {
+      cx.bind_keys([
+        { keystroke: "escape", action: "launcher-escape", context: "Launcher" },
+        ...[["tab", "complete"], ["shift-tab", "previous"], ["up", "previous"], ["down", "next"], ["ctrl-k", "previous"], ["ctrl-j", "next"]]
+          .map(([keystroke, action]) => ({ keystroke, action: `launcher-folder-${action}`, context: "LauncherFolder" })),
+      ]);
+      escapeBound = true;
+    }
     this.fork = props()?.fork ?? null;
     const f = focused();
     const source = this.fork ? panes().find((p) => p.pane === this.fork.pane) : null;
@@ -121,18 +177,22 @@ export default class Launcher extends View {
     this.on = space?.machine ?? null;
     this.pane = this.fork?.pane ?? f?.pane ?? null;
     this.cwd = this.fork ? source?.cwd ?? null : f?.cwd ?? panes().find((p) => p.focused)?.cwd ?? null;
+    this.folderBase = this.cwd; // Relative paths always start at the captured terminal, even after settling.
     this.picked = this.fork?.key;
     this.path = `${appHome()}/launcher.json`;
     this.cfg = null; // until launcher.json is read
     this.raw = null;
     this.agents = shared(KNOWN)?.[this.on ?? ""] ?? [];
     this.wt = false; // worktree mode
+    this.worktrunkReady = false;
     this.search = null; // "/" filters the program list: null when off
     this.catalog = {}; // agent key -> [[model id, name, reasoning levels], ...]
     this.own = {}; // each agent's own choice of model, where its settings name one: agent key -> model
     this.models = null; // the model list, when open: { at, search } ("/" filters it: null when off)
     this.modelScroll = ScrollHandle.new();
     this.list = undefined; // undefined: not read, null: failed (see listError)
+    this.reads = 0; // a read that was overtaken is dropped
+    this.repos = undefined; // open repositories, offered when the folder is in none: undefined until read
     this.text = "";
     this.generated = `${any(A)}-${any(B)}`;
     this.defaultBranch = "";
@@ -144,22 +204,38 @@ export default class Launcher extends View {
     this.handle = cx.focus_handle();
     this.handle.focus();
     this.input = InputState.new({ value: "", placeholder: "branch name, or a sentence to name it from" });
-    this.input.on("change", (_e, cx) => { this.text = this.input.value(); this.at = 0; this.error = ""; cx.notify(); });
+    // The worktree combo box: the field narrows its options, drawn in a popup under it.
+    this.opts = []; // the options drawn: rows(), a moment after the last key
+    this.combo = false; // whether the popup is open
+    this.narrowing = 0;
+    this.chosen = null; // an option put in the field: that change does not reopen the popup
+    this.input.on("change", (_e, cx) => {
+      this.text = this.input.value(); this.at = 0; this.error = "";
+      if (this.text !== this.chosen) { this.chosen = null; this.combo = true; }
+      // An emptied field shows everything at once; typing waits for a pause (ADR 0010).
+      if (this.text.trim()) this.narrow(cx);
+      else { this.sync(); cx.notify(); }
+    });
     this.input.on("submit", (_e, cx) => this.start(cx));
     this.inputFocused = false;
-    this.input.on("focus", (_e, cx) => { this.inputFocused = true; cx.notify(); });
-    this.input.on("blur", (_e, cx) => { this.inputFocused = false; cx.notify(); });
+    this.input.on("focus", (_e, cx) => { this.inputFocused = true; this.combo = true; this.sync(); cx.notify(); });
+    this.input.on("blur", (_e, cx) => { this.inputFocused = false; this.combo = false; cx.notify(); });
     // A new tab's or space's folder: where the focused pane is, until edited. Here, "~" stands for home.
     const mine = this.on === null && this.cwd && inside(this.cwd, home());
     this.offered = mine ? `~${this.cwd.slice(home().length)}` : this.cwd ?? "";
     this.folder = InputState.new({ value: this.offered, placeholder: "folder (empty: where Herdr starts it)" });
     this.folderFocused = false;
-    this.folder.on("change", (_e, cx) => { this.error = ""; cx.notify(); });
+    this.folderScroll = ScrollHandle.new();
+    this.folderGeneration = 0;
+    this.folderMatches = []; this.folderAt = 0;
+    this.folderOpen = false; this.folderLoading = false; this.folderError = ""; this.folderMore = false;
+    this.folder.on("change", (_e, cx) => { this.error = ""; this.suggestFolders(cx); });
     this.folder.on("submit", (_e, cx) => this.start(cx));
-    this.folder.on("focus", (_e, cx) => { this.folderFocused = true; cx.notify(); });
+    this.folder.on("focus", (_e, cx) => { this.folderFocused = true; this.suggestFolders(cx); });
     // Leaving the field settles it, so the worktree list is read from the folder typed.
     this.folder.on("blur", (_e, cx) => {
       this.folderFocused = false;
+      this.dismissFolders();
       cx.notify();
       if (this.wt && !this.busy) cx.spawn(async (cx) => { try { await this.settle(cx); } catch (error) { this.error = String(error?.message ?? error); cx.notify(); } });
     });
@@ -176,6 +252,11 @@ export default class Launcher extends View {
     this.message.on("focus", (_e, cx) => { this.messageFocused = true; cx.notify(); });
     this.message.on("blur", (_e, cx) => { this.messageFocused = false; cx.notify(); });
     if (checking()) return;
+    cx.spawn(async (cx) => {
+      await worktrunkEnabled();
+      this.worktrunkReady = true;
+      cx.notify();
+    });
     cx.spawn(async (cx) => {
       let parsed = {};
       try {
@@ -417,8 +498,8 @@ export default class Launcher extends View {
 
   // How it was opened: prefix + c is a new tab; prefix + v or - passes
   // { place: "right" | "down" }, a split of the focused pane; prefix + N passes
-  // { place: "space" }, a new space. A split stays in its tab's folder, so it
-  // never takes a worktree; a space's worktree always opens as that space.
+  // { place: "space" }, a new space. A split stays in its tab's folder, unless
+  // it takes a worktree (IN below); a space's worktree always opens as that space.
   place() {
     if (this.fork) return "right";
     const place = props()?.place;
@@ -436,7 +517,7 @@ export default class Launcher extends View {
     const typed = this.folder.value().trim();
     if (this.split() || !typed || typed === this.offered) return null;
     if (typed === this.settled?.typed) return this.settled.path;
-    const r = await exec("sh", ["-c", RESOLVE, "sh", typed], { on: this.on, timeout: 10_000 });
+    const r = await exec("sh", ["-c", RESOLVE, "sh", typed], { cwd: this.folderBase ?? undefined, on: this.on, timeout: 10_000 });
     const path = r.code === 0 ? r.stdout.trim() : "";
     if (!path) throw new Error(`No folder at ${typed}`);
     this.settled = { typed, path };
@@ -444,6 +525,7 @@ export default class Launcher extends View {
       this.cwd = path;
       this.list = undefined;
       this.at = 0;
+      this.sync();
       if (this.wt) this.load(cx);
     }
     return path;
@@ -454,6 +536,59 @@ export default class Launcher extends View {
     this.search = null;
     this.folder.focus();
     cx.notify();
+  }
+
+  dismissFolders() {
+    this.folderGeneration++;
+    this.folderOpen = false;
+    this.folderLoading = false;
+    this.folderMatches = [];
+  }
+
+  suggestFolders(cx) {
+    const generation = ++this.folderGeneration, value = this.folder.value();
+    this.folderMatches = []; this.folderAt = 0; this.folderError = ""; this.folderMore = false;
+    this.folderOpen = this.folderFocused && !this.busy;
+    this.folderLoading = this.folderOpen;
+    cx.notify();
+    if (!this.folderOpen || checking()) return;
+    const current = () => generation === this.folderGeneration && this.folderFocused;
+    cx.spawn(async cx => {
+      await cx.sleep(80);
+      if (!current()) return;
+      try {
+        const result = await folderSuggestions(value, exec, { cwd: this.folderBase ?? undefined, on: this.on });
+        if (!current()) return;
+        this.folderMatches = result.items; this.folderMore = result.more;
+        this.folderScroll.scroll_to_item(0);
+      } catch (error) {
+        if (!current()) return;
+        this.folderError = String(error?.message ?? error);
+      }
+      this.folderLoading = false;
+      cx.notify();
+    });
+  }
+
+  moveFolder(step, cx) {
+    cx.stop_propagation();
+    if (!this.folderOpen) return this.suggestFolders(cx);
+    const count = this.folderMatches.length;
+    if (!count) return;
+    this.folderAt = (this.folderAt + step + count) % count;
+    this.folderScroll.scroll_to_item(this.folderAt);
+    cx.notify();
+  }
+
+  completeFolder(cx, item = this.folderMatches[this.folderAt]) {
+    cx.stop_propagation();
+    if (!this.folderOpen) return this.suggestFolders(cx);
+    if (!item || this.busy) return;
+    this.folder.set_value(item.value);
+    this.folder.set_selected_range({ start: item.value.length, end: item.value.length });
+    this.error = "";
+    this.folder.focus();
+    this.suggestFolders(cx);
   }
 
   // The system's folder picker fills the field. It only sees this computer.
@@ -532,8 +667,10 @@ export default class Launcher extends View {
     return text ? { task: text } : {};
   }
 
+  canWorktree() { return this.worktrunkReady && shared("worktrunk.enabled") === true; }
+
   toggleWorktree(cx) {
-    if (this.split()) return;
+    if (this.fork || (!this.wt && !this.canWorktree())) return;
     this.wt = !this.wt;
     this.search = null;
     this.error = "";
@@ -545,37 +682,162 @@ export default class Launcher extends View {
     cx.notify();
   }
 
-  // Worktrees and branches, as worktrunk lists them.
+  // A folder as the folder field spells it: "~" for this computer's home.
+  spelled(path) {
+    return this.on === null && inside(path, home()) ? `~${path.slice(home().length)}` : path;
+  }
+
+  noRepo() {
+    return `No Git repository at ${this.cwd ? this.spelled(this.cwd) : "this folder"}.`;
+  }
+
+  // Worktrees and branches, as worktrunk lists them: read when the combo box is
+  // first wanted, never before. What was read here last time is shown at once
+  // and replaced when the fresh read lands. A folder in no repository gets the
+  // open repositories to choose from instead.
   load(cx) {
+    const read = ++this.reads, key = `${this.on ?? ""}\n${this.cwd ?? ""}`;
+    const kept = LISTS.get(key);
+    if (kept && this.list === undefined) {
+      keep(key, kept);
+      this.list = kept.list; this.defaultBranch = kept.defaultBranch; this.sync();
+      if (Date.now() - kept.at < LIST_FRESH) { this.reading = false; return cx.notify(); }
+    }
+    this.reading = true;
+    cx.notify();
     cx.spawn(async (cx) => {
       try {
+        if (!(await worktrunkEnabled())) return;
         if (!this.cwd) throw new Error("No folder to look for a repository in.");
         const at = { cwd: this.cwd, on: this.on };
         const branch = exec("wt", ["config", "state", "default-branch"], at).catch(() => null);
-        const r = await exec("wt", ["list", "--format", "json", "--branches"], at);
-        if (r.code !== 0) throw new Error(clean(r.stderr) || "wt list failed.");
-        this.list = JSON.parse(r.stdout).filter((w) => w.branch).map((w) => ({ branch: w.branch, path: w.kind === "worktree" ? w.path : null, main: Boolean(w.is_main), here: Boolean(w.is_current) }));
+        let running = LIST_READS.get(key);
+        if (!running) {
+          running = exec("sh", ["-c", LIST], { ...at, timeout: 60_000 });
+          LIST_READS.set(key, running);
+          const done = () => { if (LIST_READS.get(key) === running) LIST_READS.delete(key); };
+          running.then(done, done);
+        }
+        const r = await running;
+        if (read !== this.reads) return;
+        if (r.code !== 0) {
+          LISTS.delete(key);
+          if (NO_REPO.test(r.stderr)) { this.list = null; this.listError = this.noRepo(); this.sync(); return this.findRepos(cx); }
+          throw new Error(clean(r.stderr) || "wt list failed.");
+        }
+        const chosen = this.opts[this.at];
+        this.list = JSON.parse(r.stdout).map(([branch, path, main, here]) => ({ branch, path, main, here }));
+        this.sync();
+        // The option highlighted stays highlighted when the fresh list moves it.
+        const again = chosen && !chosen.typed ? this.opts.findIndex((w) => w.branch === chosen.branch) : -1;
+        if (again >= 0) this.at = again;
         cx.notify();
         const d = await branch;
+        if (read !== this.reads) return;
         if (d?.code === 0) this.defaultBranch = d.stdout.trim().split("\n").pop();
+        keep(key, { list: this.list, defaultBranch: this.defaultBranch, at: Date.now() });
       } catch (error) {
-        if (this.list) return;
-        this.list = null;
-        this.listError = String(error?.message ?? error).split("\n").slice(-3).join("\n");
+        if (read !== this.reads) return;
+        // A failed refresh leaves what was shown; a failed first read says why.
+        if (!this.list) {
+          this.list = null;
+          this.listError = String(error?.message ?? error).split("\n").slice(-3).join("\n");
+          this.sync();
+        }
+      } finally {
+        if (read === this.reads) { this.reading = false; cx.notify(); }
       }
+    });
+  }
+
+  // The repositories open in Herdr on this machine: where its spaces' terminals are.
+  findRepos(cx) {
+    if (this.repos !== undefined) return;
+    cx.spawn(async (cx) => {
+      let found = [];
+      try {
+        const mine = spaces().filter((s) => (s.machine ?? null) === this.on);
+        const tabs = new Set(mine.flatMap((s) => (s.tabs ?? []).map((t) => t.id)));
+        const dirs = [...new Set([...panes().filter((p) => tabs.has(p.tab)).map((p) => p.cwd), ...mine.map((s) => s.folder)].filter(Boolean))].slice(0, 60);
+        if (dirs.length) {
+          const r = await exec("sh", ["-c", REPOS, "sh", ...dirs], { on: this.on, timeout: 10_000 });
+          found = r.stdout.split("\n").filter(Boolean).map((path) => ({ repo: true, path, branch: path.split("/").pop() }));
+        }
+      } catch {}
+      this.repos = found;
+      this.sync();
       cx.notify();
     });
   }
 
+  // Moves the folder to a repository offered, keeping the branch typed. A split
+  // has no folder field: only where its worktree is looked for moves.
+  pickRepo(row, cx) {
+    const typed = this.spelled(row.path);
+    this.folder.set_value(typed);
+    this.settled = { typed, path: row.path };
+    this.cwd = row.path;
+    this.list = undefined;
+    this.at = 0;
+    this.error = "";
+    this.sync();
+    this.input.focus();
+    this.load(cx);
+    cx.notify();
+  }
+
   // What Enter can act on: the typed name first (unless it is a branch), then matches.
+  // In no repository, the open repositories instead: the name typed waits for one.
   rows() {
+    if (this.list === null && this.listError === this.noRepo()) return this.repos ?? [];
     const typed = this.text.trim();
     if (!typed) return [{ branch: this.generated, typed: true, create: true, generated: true }, ...(this.list ?? [])];
     if (/\s/.test(typed)) return [{ branch: typed, typed: true, create: true, sentence: true }];
     const f = typed.toLowerCase();
     const found = (this.list ?? []).filter((w) => w.branch.toLowerCase().includes(f));
-    if (found.some((w) => w.branch === typed)) return found;
+    const exact = found.find((w) => w.branch === typed);
+    if (exact) return [exact, ...found.filter((w) => w !== exact)];
     return [{ branch: typed, typed: true, create: !SHORTCUT.test(typed) }, ...found];
+  }
+
+  // The combo box's options, now. Every action on them calls this first, so a
+  // key pressed inside the wait below never acts on options from before it.
+  sync() {
+    this.narrowing++;
+    this.opts = this.rows();
+    this.at = Math.max(0, Math.min(this.at, Math.min(this.opts.length, WORKTREES_SHOWN) - 1));
+  }
+
+  // The same, a moment after the last key typed: as the folder field's suggestions.
+  narrow(cx) {
+    const turn = ++this.narrowing;
+    cx.notify();
+    cx.spawn(async (cx) => {
+      await cx.sleep(80);
+      if (turn !== this.narrowing) return;
+      this.sync();
+      this.scroll.scroll_to_item(0);
+      cx.notify();
+    });
+  }
+
+  // A click on an option: a repository becomes the folder; a branch goes in the
+  // field. Nothing starts until Enter.
+  choose(i, cx) {
+    cx.stop_propagation();
+    this.sync();
+    const row = this.opts[i];
+    if (!row || this.busy) return;
+    if (row.repo) return this.pickRepo(row, cx);
+    if (!row.typed) {
+      this.chosen = this.text = row.branch;
+      this.input.set_value(row.branch);
+      this.at = 0;
+      this.sync();
+    } else this.at = i;
+    this.combo = false;
+    this.error = "";
+    cx.notify();
   }
 
   argv(p) {
@@ -583,11 +845,13 @@ export default class Launcher extends View {
   }
 
   close() {
+    this.dismissFolders();
     closeOverlay(props().overlay);
   }
 
   start(cx, program = this.current()) {
     if (!this.cfg || this.busy || !program) return;
+    if (this.wt && !this.canWorktree()) { this.error = WORKTRUNK_OFF; return cx.notify(); }
     if (!program.installed) { this.error = `${program.name} is not installed here.`; return cx.notify(); }
     const argv = this.argv(program);
     const task = this.task(program);
@@ -603,7 +867,7 @@ export default class Launcher extends View {
         props: { source: this.fork, target: { key: program.key, name: program.name, run: program.run, argv, ...task } } });
       return;
     }
-    if (this.split()) {
+    if (this.split() && !this.wt) {
       this.close();
       run("pane.split", { direction: this.place(), ...(this.pane ? { pane: this.pane } : {}), ...(argv ? { argv: task.task ? [...argv, task.task] : argv } : {}) });
       return;
@@ -615,7 +879,10 @@ export default class Launcher extends View {
       run("tab.new", { space: this.space, ...(argv ? { name: program.name, argv, ...task } : {}) });
       return;
     }
-    let row = this.wt ? this.rows()[this.at] : null;
+    if (this.wt) this.sync();
+    let row = this.wt ? this.opts[this.at] : null;
+    if (row?.repo && !this.folderFocused) return this.pickRepo(row, cx);
+    if (this.wt && !row && this.list === null) { this.error = this.listError; return cx.notify(); }
     if (this.wt && !row) { this.error = "Type a branch name."; return cx.notify(); }
     this.busy = true;
     this.status = "";
@@ -623,7 +890,10 @@ export default class Launcher extends View {
     cx.notify();
     cx.spawn(async (cx) => {
       try {
+        if (this.wt && !(await worktrunkEnabled())) throw new Error(WORKTRUNK_OFF);
         const folder = await this.settle(cx);
+        // Enter in the folder field while no repository was known: the folder is settled, its worktrees are read.
+        if (row?.repo) { this.busy = false; this.input.focus(); return cx.notify(); }
         if (!this.wt) {
           if (this.place() === "space") run("space.new", { machine: this.on ?? "", ...(folder ? { folder } : {}), ...(argv ? { tab: program.name, argv, ...task } : {}) });
           else run("tab.new", { space: this.space, ...(folder ? { folder } : {}), ...(argv ? { name: program.name, argv, ...task } : {}) });
@@ -663,13 +933,21 @@ export default class Launcher extends View {
   // `wt switch` makes or finds the checkout and runs worktrunk's hooks; --no-cd
   // because the new tab starts there itself.
   async worktree(row, program, argv, task) {
+    if (!(await worktrunkEnabled())) return WORKTRUNK_OFF;
     const { base } = this.cfg.worktree;
     const open = this.place() === "space" ? "space" : this.cfg.worktree.open;
     const args = ["switch", ...(row.create ? ["--create", ...(base === "current" ? ["--base", "@"] : [])] : []), "--no-cd", "--format", "json", row.branch];
     const r = await exec("wt", args, { cwd: this.cwd, on: this.on, timeout: 600_000 });
     let made;
-    try { made = JSON.parse(r.stdout.split("\n").find((l) => l.trim().startsWith("{"))); } catch {}
+    // wt prints the JSON over several lines (or one, in older versions): parse from its opening brace on.
+    try { made = JSON.parse(r.stdout.slice(r.stdout.search(/^\s*\{/m))); } catch {}
+    if (r.code !== 0 && NO_REPO.test(r.stderr)) return this.noRepo();
     if (r.code !== 0 || !made?.path) return clean(r.stderr).split("\n").slice(-3).join("\n") || "wt switch failed.";
+    for (const key of [...LISTS.keys()]) if (key.startsWith(`${this.on ?? ""}\n`)) LISTS.delete(key);
+    if (this.split()) {
+      run("pane.split", { direction: this.place(), ...(this.pane ? { pane: this.pane } : {}), argv: ["sh", "-c", IN, "sh", made.path, ...(argv ? (task.task ? [...argv, task.task] : argv) : [])] });
+      return "";
+    }
     const tab = argv ? { name: program.name, argv, ...task } : {};
     if (open === "tab") {
       run("tab.new", { space: this.space, folder: made.path, name: made.branch ?? row.branch, ...tab });
@@ -692,8 +970,22 @@ export default class Launcher extends View {
   }
 
   key(e, cx) {
+    if (this.wt && !this.canWorktree()) {
+      this.wt = this.inputFocused = false;
+      this.handle.focus();
+      cx.stop_propagation();
+      cx.notify();
+      return;
+    }
     const m = e.modifiers;
     if (e.key === "escape") {
+      if (this.folderFocused && this.folderOpen) {
+        this.dismissFolders(); cx.stop_propagation(); return cx.notify();
+      }
+      // The combo box's popup closes first; what was typed stays.
+      if (this.wt && this.combo && !this.folderFocused && !this.messageFocused && !this.models) {
+        this.combo = false; cx.stop_propagation(); return cx.notify();
+      }
       // Escape steps back out of whichever field has the keyboard, not out of the Launcher.
       if (this.folderFocused || this.messageFocused || this.inputFocused) {
         cx.stop_propagation();
@@ -743,6 +1035,11 @@ export default class Launcher extends View {
       if (char === "d") return this.closeModels(cx);
       return;
     }
+    if (this.folderFocused && !m.alt && !m.platform) {
+      if (e.key === "tab") return m.shift ? this.moveFolder(-1, cx) : this.completeFolder(cx);
+      if (e.key === "up" || (m.control && e.key === "k")) return this.moveFolder(-1, cx);
+      if (e.key === "down" || (m.control && e.key === "j")) return this.moveFolder(1, cx);
+    }
     if (e.key === "tab") { done(); return this.cycle(m.shift ? -1 : 1, cx); }
     // Vim keys: plain hjkl in the program list; ctrl-j/k in the branch list,
     // where plain letters are typed into the field.
@@ -752,7 +1049,7 @@ export default class Launcher extends View {
         if (this.wt) return this.move(vim, cx);
         if (this.search !== null) { done(); return this.cycle(e.key === "k" ? -1 : 1, cx); }
       }
-      const action = { r: () => this.cycleReasoning(cx), d: () => this.openModels(cx), f: () => this.editFolder(cx), m: () => this.editMessage(cx), v: () => this.pasteFile(cx), p: () => this.browse(cx), s: () => this.toggleFlag(cx), w: () => this.toggleWorktree(cx), b: () => this.option("base", ["default", "current"], cx), o: () => this.place() === "space" || this.option("open", ["space", "tab"], cx) }[e.key];
+      const action = { r: () => this.cycleReasoning(cx), d: () => this.openModels(cx), f: () => this.editFolder(cx), m: () => this.editMessage(cx), v: () => this.pasteFile(cx), p: () => this.browse(cx), s: () => this.toggleFlag(cx), w: () => this.toggleWorktree(cx), b: () => this.option("base", ["default", "current"], cx), o: () => this.place() !== "tab" || this.option("open", ["space", "tab"], cx) }[e.key];
       if (action) { done(); action(); }
       return;
     }
@@ -770,6 +1067,7 @@ export default class Launcher extends View {
         done();
         const char = e.key_char ?? e.key;
         if (char === "j" || char === "k") this.move(vim, cx);
+        else if (char === "g" || char === "G") this.move(null, cx, char === "g" ? 0 : -1);
         else if (char === "i" || char === "/") { this.input.focus(); cx.notify(); }
         else if (char === "w") this.toggleWorktree(cx);
         else if (char === "d") this.openModels(cx);
@@ -810,13 +1108,16 @@ export default class Launcher extends View {
     if (char === "e") { setShared("config.page", "agents"); return run("mod.open", { name: "config" }); }
   }
 
-  // Moves the branch list's selection.
-  move(dir, cx) {
+  // Moves the combo box's highlight, opening its popup. to: 0 first, -1 last.
+  move(dir, cx, to) {
     cx.stop_propagation();
-    const n = this.rows().length;
-    if (!n) return;
-    this.at = (this.at + (dir === "down" ? 1 : n - 1)) % n;
-    this.scroll.scroll_to_item(this.at);
+    this.sync();
+    this.combo = true;
+    const n = Math.min(this.opts.length, WORKTREES_SHOWN);
+    if (n) {
+      this.at = to === undefined ? (this.at + (dir === "down" ? 1 : n - 1)) % n : to < 0 ? n - 1 : to;
+      this.scroll.scroll_to_item(this.at);
+    }
     cx.notify();
   }
 
@@ -844,7 +1145,7 @@ export default class Launcher extends View {
     const all = this.shown();
     const numbered = this.search === null;
     const cur = this.current() ?? { key: "", name: "", flag: [], none: true };
-    const rows = this.wt ? this.rows() : [];
+    const rows = this.wt ? this.opts.slice(0, WORKTREES_SHOWN) : [];
     const mono = "JetBrains Mono";
     const command = cur.none ? "" : cur.terminal ? "your shell" : this.argv(cur).join(" ");
 
@@ -910,7 +1211,7 @@ export default class Launcher extends View {
       .child(this.hint(t, "esc"));
     const modelList = v_flex().id("models").max_h(ROW * 12).overflow_y_scroll().track_scroll(this.modelScroll).children(modelRows.slice(0, MODELS_SHOWN).map((r, i) => {
       const on = i === modelAt, now = r.id === (cur.model ?? "");
-      return h_flex().id(`m-${i}`).flex_none().h(ROW).px(9).gap(10).items_center().rounded(6).cursor_pointer()
+      return h_flex().id(`m-${r.id}`).flex_none().h(ROW).px(9).gap(10).items_center().rounded(6).cursor_pointer()
         .when(on, (el) => el.bg(t.selected)).when(!on, (el) => el.hover((s) => s.bg(t.hover)))
         .on_click((_e, cx) => this.chooseModel(cx, r))
         .child(div().flex_none().w(12).text_color(now || r.starred ? t.accent : t.dim).child(now ? "●" : r.starred ? "★" : r.typed ? "+" : ""))
@@ -931,10 +1232,35 @@ export default class Launcher extends View {
       .child(div().flex_1().text_color(this.wt ? t.foreground : t.muted).child("In a worktree (worktrunk)"))
       .child(this.hint(t, this.wt ? "⌃W" : "w"));
 
+    // Popup owns anchoring and window-edge clamping; the input keeps focus.
+    // Reuse the launcher's compact ROW geometry (the shell scales it with zoom).
+    const folderMenu = v_flex().w(360).p(4).gap(4).rounded(6).border(1).border_color(t.border).bg(t.popover).shadow_lg()
+      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+      .child(v_flex().id("folder-options").role("list_box").accessibility_label("Folder suggestions")
+        .max_h(ROW * 5).overflow_y_scrollbar().track_scroll(this.folderScroll)
+        .children(this.folderMatches.map((item, i) => h_flex().id(`folder-${item.value}`).role("list_box_option")
+          .accessibility_label(item.label).aria_selected(i === this.folderAt)
+          .when(i === this.folderAt, el => el.aria_active_descendant())
+          .flex_none().h(ROW).px(8).gap(8).rounded(4).items_center()
+          .bg(i === this.folderAt ? t.selected : t.popover).hover(s => s.bg(i === this.folderAt ? t.selected : t.hover))
+          .on_click((_e, cx) => this.completeFolder(cx, item))
+          .child(svg("mods/files/folder.svg").size(13).flex_none().text_color(t.muted))
+          .child(div().flex_1().min_w(0).truncate().font_family(mono).text_size(12).text_color(t.foreground).child(item.label))
+          .when(i === this.folderAt, el => el.child(this.hint(t, "tab"))))))
+      .when(!this.folderMatches.length, el => el.child(div().px(8).py(6).text_size(12).text_color(this.folderError ? t.blocked : t.muted)
+        .child(this.folderLoading ? waiting(t, "Finding folders") : this.folderError || "No matching folders")))
+      .when(this.folderMore, el => el.child(div().px(8).py(4).text_size(11).text_color(t.dim).child("More folders available · keep typing to narrow")));
+    const folderInput = Input.new(this.folder).w_full().h(28).px(8).items_center().rounded(6).border(1)
+      .border_color(this.folderFocused ? t.accent : t.input).bg(t.background)
+      .accessibility_label("Starting folder").font_family(mono).text_size(12).text_color(t.foreground);
     const folder = h_flex().h(32).px(2).gap(9).items_center()
       .child(svg("mods/files/folder.svg").size(14).flex_none().text_color(t.muted))
-      .child(Input.new(this.folder).flex_1().h(28).px(8).items_center().rounded(6).border(1).border_color(this.folderFocused ? t.accent : t.input).bg(t.background)
-        .font_family(mono).text_size(12).text_color(t.foreground))
+      .child(div().flex_1().min_w(0).key_context("LauncherFolder")
+        .on_action("launcher-folder-complete", (_e, cx) => this.completeFolder(cx))
+        .on_action("launcher-folder-next", (_e, cx) => this.moveFolder(1, cx))
+        .on_action("launcher-folder-previous", (_e, cx) => this.moveFolder(-1, cx))
+        .child(Popup.new("folder-completion", folderInput).w_full().anchor("top_left")
+          .when(this.folderFocused && this.folderOpen && !this.busy, el => el.content(folderMenu))))
       .child(this.hint(t, this.folderFocused ? "esc" : this.wt ? "⌃F" : "f"))
       .when(this.canBrowse(), (el) => el
         .child(div().id("browse").flex_none().h(28).px(9).flex().items_center().rounded(6).border(1).border_color(t.input).cursor_pointer()
@@ -959,30 +1285,64 @@ export default class Launcher extends View {
       .when(!this.wt && !this.messageFocused && !this.folderFocused, (el) => el.child(this.hint(t, "x")));
 
     const here = (this.list ?? []).find((w) => w.here)?.branch ?? "";
-    const list = v_flex().id("wt-list").max_h(ROW * 5).overflow_y_scroll().track_scroll(this.scroll).children(rows.map((w, i) => {
-      const on = i === this.at;
-      const from = `new branch from ${this.cfg.worktree.base === "current" ? (here || "here") : (this.defaultBranch || "the default branch")}`;
+    const noRepo = this.list === null && this.listError === this.noRepo();
+    const from = `new branch from ${this.cfg?.worktree.base === "current" ? (here || "here") : (this.defaultBranch || "the default branch")}`;
+    // One option: in the popup it is highlighted and clicked; under the closed field it says what Enter acts on.
+    const option = (w, i, listed) => {
+      const on = listed && i === this.at;
+      const row = h_flex().id(`${listed ? "o" : "now"}-${w.repo ? `r-${w.path}` : w.typed ? "typed" : w.branch}`).flex_none().h(ROW).px(8).gap(8).items_center().rounded(listed ? 4 : 6).cursor_pointer()
+        .when(listed, (el) => el.role("list_box_option").accessibility_label(w.branch).aria_selected(on).when(on, (el) => el.aria_active_descendant())
+          .bg(on ? t.selected : t.popover).hover((s) => s.bg(on ? t.selected : t.hover))
+          .on_click((_e, cx) => this.choose(i, cx)))
+        .when(!listed, (el) => el.bg(t.selected).on_click((_e, cx) => { this.combo = true; this.input.focus(); cx.notify(); }));
+      if (w.repo) return row
+        .child(svg("mods/files/folder.svg").size(13).flex_none().text_color(t.muted))
+        .child(div().flex_none().max_w(200).truncate().text_color(t.foreground).child(w.branch))
+        .child(div().flex_1().min_w(0).truncate().font_family(mono).text_size(11).text_color(t.dim).child(this.spelled(w.path)));
       const note = w.sentence ? `named for you · ${from}` : w.generated ? `generated name · ${from}` : w.typed ? (w.create ? from : "worktrunk shortcut") : w.here ? "you are here" : w.main ? "main checkout" : w.path ? "worktree" : "branch";
-      return h_flex().id(`w-${i}`).flex_none().h(ROW).px(8).gap(8).items_center().rounded(6).cursor_pointer()
-        .when(on, (el) => el.bg(t.selected)).when(!on, (el) => el.hover((s) => s.bg(t.hover)))
-        .on_click((_e, cx) => { this.at = i; this.start(cx); })
+      return row
         .child(div().flex_none().w(10).text_color(w.typed && w.create ? t.accent : t.dim).child(w.typed && w.create ? "+" : w.path ? "●" : "○"))
         .child(div().flex_1().min_w(0).truncate().text_color(t.foreground).child(w.branch))
         .child(this.hint(t, note));
-    }));
+    };
+    const more = this.opts.length - rows.length;
+    // What is still being read, said where its result will land.
+    const reading = this.list === undefined ? "Reading worktrees" : noRepo && this.repos === undefined ? "Finding open repositories" : this.reading ? "Refreshing worktrees" : "";
+    const comboMenu = v_flex().w(420).p(4).gap(4).rounded(6).border(1).border_color(t.border).bg(t.popover).shadow_lg()
+      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+      .when(noRepo && rows.length > 0, (el) => el.child(div().px(8).pt(2).text_size(11).text_color(t.dim).child("Open repositories")))
+      .child(v_flex().id("wt-options").role("list_box").accessibility_label(noRepo ? "Open repositories" : "Worktrees and branches")
+        .max_h(ROW * 6).overflow_y_scrollbar().track_scroll(this.scroll)
+        .children(rows.map((w, i) => option(w, i, true))))
+      .when(!rows.length && !reading, (el) => el.child(div().px(8).py(6).text_size(12).text_color(t.muted)
+        .child(noRepo ? "No repository is open: set the folder above (⌃F) to one." : "Nothing matches.")))
+      .when(Boolean(reading), (el) => el.child(div().px(8).py(4).text_size(11).text_color(t.dim).child(waiting(t, reading))))
+      .when(more > 0, (el) => el.child(div().px(8).py(4).text_size(11).text_color(t.dim).child(`${more} more · keep typing to narrow`)));
+    const comboOpen = this.combo && !this.busy;
+    const comboInput = Input.new(this.input).w_full().h(32).px(10).items_center().rounded(6).border(1).border_color(this.inputFocused ? t.accent : t.input).bg(t.background).text_color(t.foreground)
+      .accessibility_label("Worktree or branch");
+    const now = rows[this.at];
 
     const wtBody = v_flex().gap(8).pl(26)
-      .child(Input.new(this.input).h(32).px(10).items_center().rounded(6).border(1).border_color(this.inputFocused ? t.accent : t.input).bg(t.background).text_color(t.foreground))
+      .child(h_flex().gap(9).items_center()
+        // Built as the folder field is: a Popup under the input, which keeps the keyboard.
+        // Base's Combobox root would take Enter, Escape and the arrows for itself.
+        .child(div().flex_1().min_w(0)
+          .child(Popup.new("wt-popup", comboInput).w_full().anchor("top_left").when(comboOpen, (el) => el.content(comboMenu))))
+        .child(div().id("wt-open").flex_none().size(28).flex().items_center().justify_center().rounded(6).border(1).border_color(t.input).cursor_pointer()
+          .text_size(11).text_color(t.muted).hover((s) => s.bg(t.hover).text_color(t.foreground))
+          .on_click((_e, cx) => { this.combo = !this.combo; if (this.combo) { this.sync(); this.input.focus(); } cx.notify(); })
+          .child(comboOpen ? "▴" : "▾")))
       .child(h_flex().gap(16).flex_wrap()
         .child(this.segment(t, "base", "From", [["default", this.defaultBranch || "default branch"], ["current", here && here !== this.defaultBranch ? here : "current"]], this.cfg?.worktree.base, "⌃B", (v, cx) => this.option("base", v, cx)))
-        .when(this.place() !== "space", (el) => el.child(this.segment(t, "open", "Open as", [["space", "space"], ["tab", "tab"]], this.cfg?.worktree.open, "⌃O", (v, cx) => this.option("open", v, cx)))))
-      .when(this.list === undefined, (el) => el.child(div().text_color(t.dim).child("Reading worktrees…")))
+        .when(this.place() === "tab", (el) => el.child(this.segment(t, "open", "Open as", [["space", "space"], ["tab", "tab"]], this.cfg?.worktree.open, "⌃O", (v, cx) => this.option("open", v, cx)))))
       .when(this.list === null, (el) => el.child(div().text_color(t.muted).child(this.listError || "Could not list worktrees.")))
-      .when(Boolean(this.list) && rows.length > 0, (el) => el.child(list))
-      .when(Boolean(this.list) && rows.length === 0, (el) => el.child(div().text_color(t.dim).child("No worktrees yet: type a branch name.")));
+      .when(!comboOpen && Boolean(reading), (el) => el.child(div().text_color(t.dim).child(waiting(t, reading))))
+      .when(!comboOpen && Boolean(now), (el) => el.child(option(now, this.at, false)))
+      .when(!comboOpen && noRepo && this.repos !== undefined && !now, (el) => el.child(div().text_size(11).text_color(t.dim).child("No repository is open: set the folder above (⌃F) to one.")));
 
     const split = this.split();
-    const foot = this.busy ? this.status || "working…" : this.models ? (this.models.search !== null ? "type to narrow · ↑↓ or ⌃J ⌃K choose · ↵ use · esc back" : "j k g G choose · / search · s star · ↵ use · esc back") : this.folderFocused ? "type a folder · ↵ start · esc back" : this.messageFocused ? `type ${cur.name}'s first message · ⌃V file · ⇧↵ new line · ⌘↵ start · esc back` : this.wt ? (this.inputFocused ? "↑↓ or ⌃J ⌃K choose · tab program · ↵ start · esc back" : "j k choose · i branch name · tab program · ↵ start · esc") : this.search !== null ? "↑↓ or ⌃J ⌃K choose · ↵ start · esc back" : `j k choose · / search · e edit list · 1–9 select · ↵ start · esc`;
+    const foot = this.busy ? this.status || "working…" : this.models ? (this.models.search !== null ? "type to narrow · ↑↓ or ⌃J ⌃K choose · ↵ use · esc back" : "j k g G choose · / search · s star · ↵ use · esc back") : this.folderFocused ? "↑↓ choose · tab complete · ↵ start · esc back" : this.messageFocused ? `type ${cur.name}'s first message · ⌃V file · ⇧↵ new line · ⌘↵ start · esc back` : this.wt && noRepo ? (this.inputFocused ? "↑↓ or ⌃J ⌃K choose · ↵ use repository · esc back" : "j k g G choose · i branch name · ↵ use repository · esc") : this.wt ? (this.inputFocused ? "type to narrow · ↑↓ or ⌃J ⌃K choose · tab program · ↵ start · esc back" : "j k g G choose · i branch name · tab program · ↵ start · esc") : this.search !== null ? "↑↓ or ⌃J ⌃K choose · ↵ start · esc back" : `j k choose · / search · e edit list · 1–9 select · ↵ start · esc`;
 
     // The overlay has no frame and is taller than the card, so the card keeps its own height.
     return div().size_full().on_drop((e, cx) => this.attach(e.paths ?? [], cx)).child(
@@ -994,14 +1354,14 @@ export default class Launcher extends View {
           .child(cur.none ? "Choose an agent to continue with." : cur.key === this.fork.key
             ? this.fork.canFork ? `Fork this ${this.fork.name} session into a right split.` : "This CLI has no native fork recipe yet. Choose another for a handover."
             : `Hand over from ${this.fork.name} to ${cur.name} in a right split. The source sends its context and stays open.`)))
-        .when(!this.cfg, (el) => el.child(div().text_color(t.dim).child("…")))
+        .when(!this.cfg, (el) => el.child(div().text_color(t.dim).child(waiting(t, "Reading settings"))))
         .when(Boolean(this.cfg) && Boolean(this.models), (el) => el.child(modelBody))
         .when(Boolean(this.cfg) && !this.models, (el) => el.when(this.search !== null, (el) => el.child(searchBar)).child(chips).child(flag)
           .when(!cur.terminal && !cur.none, (el) => el.child(model)
             .when(Boolean(cur.reasoningFlag?.length), (el) => el.child(reasoning)))
           .when(!split, (el) => el.child(folder))
           .when(this.takesMessage(), (el) => el.child(message).when(this.on === null && this.files.length > 0, (el) => el.child(files)))
-          .when(!split, (el) => el.child(div().h(1).bg(t.border)).child(worktree)).when(!split && this.wt, (el) => el.child(wtBody)))
+          .when(!this.fork && this.canWorktree(), (el) => el.child(div().h(1).bg(t.border)).child(worktree)).when(!this.fork && this.canWorktree() && this.wt, (el) => el.child(wtBody)))
         .when(Boolean(this.error), (el) => el.child(div().text_color(t.blocked).child(this.error)))
         .child(h_flex().justify_end().gap(6).text_size(11).text_color(t.dim)
           .when(this.busy, (el) => el.child(div().frames(SPINNER, 90)))

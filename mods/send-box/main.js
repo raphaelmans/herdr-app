@@ -32,6 +32,8 @@ const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const GEO = "pane-geo"; // shared by pane-header: each pane's header box
 const STATUS_BAR = 34; // room kept for the status bar at the bottom
 const MARGIN = 16;
+const AREA_PAD = 10;    // the text area's padding
+const AREA_LINE = 21.5; // one line of its 13px text, rounded up
 
 const overlap = (a, b) =>
   Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x)) *
@@ -92,7 +94,8 @@ export default class SendBox extends View {
     this.wrap = p.wrap ?? null;
     this.hub = p.hub ?? null;
     this.back = p.back ?? null;
-    this.area = TextareaState.new({ placeholder: "Type a message…  (Enter for a new line, Cmd+Enter to send)", value: this.text, rows: 8 });
+    this.rows = 4; // until the frame is measured; fits the smallest window
+    this.area = TextareaState.new({ placeholder: "Type a message…  (Enter for a new line, Cmd+Enter to send)", value: this.text, rows: this.rows });
     // Start after any supplied text, including pulled output, ready to append.
     this.area.set_selected_range({ start: this.text.length, end: this.text.length });
     this.area.on("change", (_e, cx) => { this.text = this.area.value(); cx.notify(); });
@@ -226,8 +229,14 @@ export default class SendBox extends View {
         .child(div().text_size(11).text_color(t.dim).child(this.typing ? "drag to move · esc leave field" : "i type · esc close")))
       .child(div().text_size(11.5).text_color(t.dim).child(this.terminal ? `To: ${this.label}${this.wrap?.from ? `  ·  From: ${this.wrap.from} (replies go back there)` : ""}` : "No terminal had focus. Close this, click a terminal, and try again."))
       .child(div().id("sb-area").flex_1().min_h(0).flex().cursor_text()
+        // The text area scrolls past the rows it was told it shows, not past
+        // its frame: keep that count at what fits, or the last lines are cut off.
+        .on_size_change((size) => {
+          const rows = Math.max(2, Math.floor((size.height - AREA_PAD * 2 - 2) / AREA_LINE));
+          if (rows !== this.rows) { this.rows = rows; this.area.set_rows(rows); }
+        })
         .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-        .child(Textarea.new(this.area).flex_1().min_h(0).p(10).rounded(9).border_1().border_color(this.typing ? t.accent : t.input).bg(t.background).text_size(13).text_color(t.foreground)))
+        .child(Textarea.new(this.area).flex_1().min_h(0).p(AREA_PAD).rounded(9).border_1().border_color(this.typing ? t.accent : t.input).bg(t.background).text_size(13).text_color(t.foreground)))
       .child(h_flex().gap(8).justify_end()
         .child(button("sb-cancel", "Cancel", false, () => this.dismiss()))
         .child(button("sb-send", "Send  ⌘↵", true, () => this.send(), canSend)));

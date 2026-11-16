@@ -1,8 +1,12 @@
 // Cmd+O: find paths below the terminal's captured cwd; choose a viewer afterward.
-import { View, div } from "gpui-kit";
+import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, Input, InputState, VirtualListScrollHandle, v_virtual_list, Scrollbar, Editor, EditorState } from "gpui-base";
 import { checking, focused, spaces, terminals, panes, exec, readTextFile, openOverlay, closeOverlay, props, theme, run, notify } from "herdr";
 import { indexFiles, search } from "./search.js";
+
+// A wait: one spinner, turned natively, and what is being waited for.
+const SEARCH_PAUSE = 1000;
+const waiting = (t, label) => h_flex().gap(8).items_center().child(svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900)).child(label);
 
 const markdown = path => /\.(md|markdown|mdown)$/i.test(path);
 const absolute = (root, path) => `${root.replace(/[\\/]$/, "")}/${path}`;
@@ -33,7 +37,7 @@ export default class FilePicker extends View {
     this.scroll = VirtualListScrollHandle.new();
     this.handle = cx.focus_handle();
     this.input.on("change", (_e, cx) => this.filter(cx));
-    this.input.on("submit", (_e, cx) => this.openFile(cx));
+    this.input.on("submit", (_e, cx) => this.submit(cx));
     this.input.on("focus", (_e, cx) => { this.typing = true; cx.notify(); });
     this.input.on("blur", (_e, cx) => { this.typing = false; cx.notify(); });
     if (checking()) { this.loading = false; return; }
@@ -88,7 +92,7 @@ export default class FilePicker extends View {
             ? "File list reached Herdr's output limit. Open a narrower working directory."
             : r.code > 1 ? "Some folders could not be read; showing available files." : null;
           this.loading = false;
-          this.filter(cx);
+          this.filter(cx, true);
         } catch (e) { if (current()) { this.error = String(e.message ?? e); this.loading = false; } }
         if (current()) break;
       }
@@ -97,19 +101,31 @@ export default class FilePicker extends View {
     });
   }
 
-  filter(cx) {
+  // Debounced: the search runs once typing pauses for SEARCH_PAUSE ms. The
+  // previous results stay on screen meanwhile, so the list doesn't blank and
+  // flicker on every keystroke. `now` skips the pause (first fill, Enter).
+  filter(cx, now = false) {
     const token = ++this.generation, query = this.input.value(), items = this.files;
-    this.matches = []; this.at = 0; this.searching = Boolean(query.trim());
+    this.searching = Boolean(query.trim());
     cx.notify();
     const current = () => !this.closed && token === this.generation;
     cx.spawn(async cx => {
-      if (query.trim()) await cx.sleep(40);
+      if (query.trim() && !now) await cx.sleep(SEARCH_PAUSE);
       if (!current()) return;
       const result = await search(items, query, () => cx.sleep(1), current);
       if (!result || !current()) return;
-      this.matches = result; this.searching = false;
+      this.matches = result; this.at = 0; this.searching = false;
       this.scroll.scroll_to_item(0); cx.notify();
+      if (this.openWhenSearched) { this.openWhenSearched = false; this.openFile(cx); }
     });
+  }
+
+  // Enter while a search is still pending opens the top result for what was
+  // typed, not the stale row left from the previous query.
+  submit(cx) {
+    if (!this.searching) return this.openFile(cx);
+    this.openWhenSearched = true;
+    this.filter(cx, true);
   }
 
   selectedPath() { return this.selected ?? this.matches[this.at]?.path; }
@@ -342,21 +358,21 @@ export default class FilePicker extends View {
               .track_scroll(this.scroll).size_full()
               .on_item_click((key, cx) => { const i = this.matches.findIndex(item => item.path === key); if (i < 0) return; this.at = i; this.normal(cx); }))
             .child(Scrollbar.vertical("fp-results").absolute().inset_0()))
-          .when(!matches.length, box => box.child(div().p(12).text_color(t.dim).child(this.error || (this.loading ? "Finding files…" : this.searching ? "Searching…" : "No matching files")))))
+          .when(!matches.length, box => box.child(div().p(12).text_color(t.dim).child(this.error || (this.loading ? waiting(t, "Finding files") : this.searching ? waiting(t, "Searching") : "No matching files")))))
         .when(Boolean(this.warning), el => el.child(div().text_size(11).text_color(t.blocked).child(this.warning)))
-        .child(div().text_size(11).text_color(t.dim).child(this.typing
+        .child(div().text_size(11).text_color(t.dim).child(this.searching && matches.length ? waiting(t, "Searching") : this.typing
           ? `${matches.length} files · INSERT · Esc navigate · Ctrl+J/K select · Enter open`
           : `${matches.length} files · NORMAL · j/k move · / search · Enter/l open · p preview · ? help`)))
       .when(Boolean(this.selected) && !this.help, el => el
         .child(h_flex().items_center().gap(10)
           .child(button("fp-back", "← Files · h", (_e, cx) => this.back(cx)))
           .child(div().flex_1().truncate().child(this.selected)))
-        .child(this.code ? Editor.new(this.code).flex_1().min_h(0) : div().flex_1().p(12).child(this.previewError || "Loading preview…")))
+        .child(this.code ? Editor.new(this.code).flex_1().min_h(0) : div().flex_1().p(12).child(this.previewError || (this.selected ? waiting(t, "Reading preview") : ""))))
       .child(h_flex().gap(8).justify_end()
         .when(!this.selected, el => el.child(button("fp-preview", markdown(path ?? "") ? "Markdown preview · p" : "Preview · p", (_e, cx) => this.preview(cx), Boolean(path))))
         .child(button("fp-copy", "Copy relative path · y", (_e, cx) => this.copyPath(cx), Boolean(path)))
         .child(button("fp-copy-absolute", "Copy absolute path · Y", (_e, cx) => this.copyPath(cx, true), Boolean(path && this.root)))
         .when(markdown(path ?? ""), el => el.child(button("fp-nvim", "Edit in Neovim · e", (_e, cx) => this.openNvim(cx), Boolean(path) && !this.opening)))
-        .child(button("fp-open", this.opening ? "Opening…" : markdown(path ?? "") ? "Open preview pane · ↵" : "Open in Neovim · ↵", (_e, cx) => this.openFile(cx), Boolean(path) && !this.opening)));
+        .child(button("fp-open", this.opening ? waiting(t, "Opening") : markdown(path ?? "") ? "Open preview pane · ↵" : "Open in Neovim · ↵", (_e, cx) => this.openFile(cx), Boolean(path) && !this.opening)));
   }
 }

@@ -73,7 +73,11 @@ export default class NvimPane extends View {
       if (cwd) args.push("--cwd", cwd);
       if (space?.machine) args.push("--on", space.machine);
       // A socket file left by an nvim that died would stop the new one.
-      const r = await hc([...args, "--", "sh", "-c", 'rm -f "$1"; exec nvim --listen "$1"', "sh", SOCKET(f.tab)]);
+      // herdr-core starts this with the app's short PATH, not a login shell's,
+      // so a mise-owned nvim is not found. Prepend its shims, as health.sh does.
+      const r = await hc([...args, "--", "sh", "-c",
+        'rm -f "$1"; d="${MISE_DATA_DIR:-$HOME/.local/share/mise}/shims"; [ -d "$d" ] && PATH="$d:$PATH"; export PATH; exec nvim --listen "$1"',
+        "sh", SOCKET(f.tab)]);
       try { terminal = JSON.parse(r.stdout).address ?? null; } catch {}
       if (r.code !== 0 || !terminal) {
         notify({ title: "nvim did not start", body: (r.stderr || r.stdout).trim().slice(-300), level: "error" });

@@ -1,7 +1,10 @@
 // What the pages draw alike.
-import { div } from "gpui-kit";
+import { div, svg } from "gpui-kit";
 import { h_flex } from "gpui-base";
 import { home } from "herdr";
+
+// A wait: one spinner, turned natively, and what is being waited for.
+export const waiting = (t, label) => h_flex().gap(6).items_center().child(svg("mods/workspace-chrome/spinner.svg").size(11).flex_none().text_color(t.working).spin(900)).child(label);
 
 export const heading = (t, label, note) => h_flex().flex_none().px(4).gap(8).items_end().text_size(11)
   .child(div().flex_none().font_semibold().text_color(t.muted).child(label))

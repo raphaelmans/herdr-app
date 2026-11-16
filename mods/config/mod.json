@@ -1,3 +1,3 @@
 { "place": "none", "title": "Config", "overlay": { "kind": "dialog", "width": 780, "height": 0.8 },
-  "spec": {"extras": ["wt", "jq", "curl", "obsidian"], "for": {"skillshare": {"needs": ["skillshare"]}}}
+  "spec": {"extras": ["jq", "curl", "obsidian"], "for": {"skillshare": {"needs": ["skillshare"]}}}
 }

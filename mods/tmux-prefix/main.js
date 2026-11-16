@@ -42,6 +42,8 @@ const BINDINGS = [
   ["i", "Send box", "mod.open", { name: "send-box" }],
   ["m", "Agent hub", "mod.open", { name: "agent-hub" }],
   ["L", "Lific", "mod.open", { name: "lific" }],
+  ["I", "Lific request…", "mod.open", { name: "lific-request" }],
+  ["P", "Pull requests", "mod.open", { name: "pull-requests" }],
   ["B", "Jira", "mod.open", { name: "jira" }],
   ["f", "Fork agent session", "mod.open", { name: "agent-fork" }],
   ["M", "Config", "mod.open", { name: "config" }],
@@ -58,7 +60,7 @@ const BINDINGS = [
 // neither listed nor run, and the space keys pass over spaces it leaves out.
 const veiled = () => Boolean(shared("curtain")?.on);
 const hiddenSpaces = () => new Set((shared("spaces.sections")?.sections ?? []).filter((s) => s.hidden).flatMap((s) => s.members));
-const showsAgents = (command, args) => command.startsWith("agent.") || (command === "mod.open" && ["agent-hub", "agent-fork", "go-to"].includes(args?.name));
+const showsAgents = (command, args) => command.startsWith("agent.") || (command === "mod.open" && ["agent-hub", "agent-fork", "go-to", "lific-request"].includes(args?.name));
 
 // Leading status glyphs agents put in titles: spinners (braille), ✳, ●, emoji.
 const TITLE_NOISE = /^[\u2800-\u28FF\u2700-\u27BF\u2600-\u26FF\u25A0-\u25FF\u2022\u00B7*\p{Extended_Pictographic}\uFE0F\s]+/u;

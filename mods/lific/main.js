@@ -17,6 +17,18 @@
 //   n            new issue (todo) or page (draft): type a title, enter creates it
 //   enter / i    hand the issue or page to the pane you came from (your send box, prefilled)
 //   y            copy the identifier · o open it in the web UI · r refresh · q esc close
+//   :            a Lific request: say what should be done, in your own words, in the
+//                box along the bottom (cmd-enter runs it, esc leaves the box).
+//                "new issue: the export button does nothing on Safari"
+//                "mark RAISE-12 done and comment that it shipped in 2.4"
+//                It works in the project shown unless the words name another.
+//                The Lific agent (Config → Lific, shared "lific.agent": a shell
+//                command that reads the request on stdin, acts through Lific's MCP
+//                tools and prints what it did) carries it out; the list then
+//                shows the issue it touched. Terms: GLOSSARY.md.
+//                cmd-shift-i / ctrl-a I (mods/lific-request, an opener) open this
+//                window straight into that box: shared "lific.ask" { n, at }
+//                asks for it, and a window that is up answers with "lific.ack".
 //
 // Opened with ctrl-a L (tmux-prefix). It's a window: drag it by any empty spot,
 // it reopens where you left it.
@@ -24,9 +36,12 @@
 // lific server doesn't have to run. The binary is ~/.local/bin/lific, a link to
 // the fork's build in ~/Documents/Coding/2026/lific (never upstream's release).
 
-import { View, div } from "gpui-kit";
+import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, ScrollHandle, Scrollbar, InputState, Input, TextareaState, Textarea, TextView } from "gpui-base";
-import { checking, closeOverlay, exec, focused, home, nextCommand, notify, panes, props, run, setShared, spaces, theme } from "herdr";
+import { checking, closeOverlay, exec, focused, home, nextCommand, notify, panes, props, run, setShared, shared, spaces, theme } from "herdr";
+
+// A wait: one spinner, turned natively, and what is being waited for.
+const waiting = (t, label) => h_flex().gap(8).items_center().child(svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900)).child(label);
 
 const REFRESH_MS = 10000;
 const WEB = "http://127.0.0.1:3456";
@@ -39,6 +54,27 @@ const FILTERS = ["open", "all", "closed"];
 const LIST_W = 380;
 const LINE = 21;  // a line of body text, px (for scrolling by the keyboard)
 const isOpen = (s) => s === "backlog" || s === "todo" || s === "active" || s === "draft";
+const ASK = "lific.ask", ACK = "lific.ack", AGENT = "lific.agent";
+const HEAD = { active: "Active", todo: "Todo", backlog: "Backlog", done: "Done", cancelled: "Cancelled" };
+const tail = (s, n = 3) => String(s ?? "").trim().split("\n").map((l) => l.trim()).filter(Boolean).slice(-n).join("\n");
+const flat = (s) => String(s ?? "").replace(/\s+/g, " ").trim();
+
+// What the Lific agent reads: the rules of one request, then the request.
+function word(text, project, projects, folder) {
+  const known = projects.length ? ` The projects: ${projects.map((p) => `${p.identifier} (${p.name})`).join(", ")}.` : "";
+  return [
+    "You carry out one request against the Lific issue tracker through its MCP tools, then stop. Nobody can answer a question, so do not ask one.",
+    "Do what the request says and nothing more. Never delete anything unless the request says to in plain words.",
+    project
+      ? `The person is looking at project ${project}: work in it unless the request names another.${known}`
+      : `No project is shown. Use the one the request names.${known} If it names none, use the one that matches the folder the person is working in${folder ? ` ("${folder}")` : ""}. If that is still unclear, change nothing and say which project to name.`,
+    "A new issue gets a short title and, when the request gives more, a description that keeps the person's own words.",
+    "Reply with one or two plain lines, no markdown: what you did, with each identifier (like APP-12). If you changed nothing, say why.",
+    "",
+    "Request:",
+    text,
+  ].join("\n");
+}
 const slug = (s) => (s ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
 
 // Markdown as blocks (split on blank lines, code fences kept whole), so the
@@ -92,9 +128,29 @@ export default class Lific extends View {
       this.filter = localStorage.getItem("filter") || "open";
     } catch {}
 
+    // A Lific request: the box along the bottom, what is being carried out, and the last answer.
+    this.cwd = space?.machine ? null : pane?.cwd ?? f.cwd ?? null; // lific runs here
+    this.runs = [];        // { id, text, project }
+    this.said = null;      // { ok, text }: how the last request ended
+    this.count = 0;
+    this.asking = false;   // the request box has the keyboard
+    this.req = TextareaState.new({ placeholder: "Tell Lific what to do: new issue…, mark … done, comment on …", value: "", rows: 3 });
+    try { this.req.set_value(localStorage.getItem("request") ?? ""); } catch {}
+    this.req.on("change", (_e, cx) => { try { localStorage.setItem("request", this.req.value() ?? ""); } catch {} cx.notify(); });
+    this.req.on("focus", (_e, cx) => { this.asking = true; this.leaving = false; cx.notify(); });
+    this.req.on("blur", (_e, cx) => { this.asking = false; cx.notify(); });
+    this.req.on("submit", (e, cx) => {
+      if (e?.secondary) this.sendRequest(cx);
+      else if (e?.shift) this.req.replace("\n");
+    });
+    // Opened by the request key: straight into that box.
+    const ask = shared(ASK);
+    this.asked = ask?.n ?? 0;
+    const wanted = Boolean(ask) && Date.now() - (ask.at ?? 0) < 5000;
+
     this.handle = cx.focus_handle();
-    this.handle.focus();
-    cx.timer.after(150, () => { if (!this.busy()) this.handle.focus(); });
+    if (wanted) this.req.focus(); else this.handle.focus();
+    cx.timer.after(150, () => { if (wanted && !this.prompt && !this.editing) this.req.focus(); else if (!this.busy()) this.handle.focus(); });
     this.listScroll = ScrollHandle.new();
     this.bodyScroll = ScrollHandle.new();
 
@@ -121,6 +177,7 @@ export default class Lific extends View {
     });
 
     if (checking()) return; // a check draws the window; it runs no lific
+    if (wanted) setShared(ACK, ask.n);
     this.start(cx);
     cx.timer.every(REFRESH_MS, (cx) => { if (this.project && !this.busy()) this.load(cx); });
     cx.spawn(async (cx) => {
@@ -129,7 +186,7 @@ export default class Lific extends View {
   }
 
   // Typing somewhere: keys belong to that field, and nothing reloads under it.
-  busy() { return Boolean(this.prompt || this.editing || this.searching); }
+  busy() { return Boolean(this.prompt || this.editing || this.searching || this.asking); }
 
   // One lific call; JSON out, or a thrown message.
   async cli(args) {
@@ -198,6 +255,15 @@ export default class Lific extends View {
         this.counts[project] = this.issues.filter((i) => isOpen(i.status)).length;
         // A page arrives whole (its text included); the workspace's follow the project's.
         this.pages = [...(Array.isArray(pages) ? pages : []), ...(Array.isArray(workspace) ? workspace : []).map((p) => ({ ...p, workspace: true }))];
+        // The issue a request touched: shown, whatever the filter was.
+        const want = this.reveal;
+        if (want && this.issues.some((i) => i.identifier === want)) {
+          this.reveal = null; this.mode = "issues"; this.query = ""; this.selected = want;
+          if (!this.list().some((i) => i.identifier === want)) this.filter = "all";
+          const n = this.entries(this.list()).findIndex((e) => e.item?.identifier === want);
+          if (n >= 0) this.listScroll.scroll_to_item(n);
+          this.resetScroll();
+        }
         this.error = null;
         this.loaded = true;
         cx.notify();
@@ -237,6 +303,18 @@ export default class Lific extends View {
       (ORDER[a.status] ?? 9) - (ORDER[b.status] ?? 9) || (PRIORITY[a.priority] ?? 9) - (PRIORITY[b.priority] ?? 9) || b.sequence - a.sequence);
   }
 
+  // The list as drawn: the issues under a heading per status. A search or the
+  // pages are one plain run.
+  entries(list) {
+    if (this.mode === "pages" || this.query.trim()) return list.map((item) => ({ item }));
+    const out = [];
+    list.forEach((item, i) => {
+      if (item.status !== list[i - 1]?.status) out.push({ head: item.status, count: list.filter((x) => x.status === item.status).length });
+      out.push({ item });
+    });
+    return out;
+  }
+
   current() {
     const l = this.list();
     return l.find((i) => i.identifier === this.selected) ?? l[0] ?? null;
@@ -254,8 +332,9 @@ export default class Lific extends View {
   select(id, cx) {
     if (id === this.selected) return;
     this.selected = id;
-    const n = this.list().findIndex((i) => i.identifier === id);
-    if (n >= 0) this.listScroll.scroll_to_item(n);
+    const n = this.entries(this.list()).findIndex((e) => e.item?.identifier === id);
+    // The first issue of a group brings its heading along.
+    if (n >= 0) this.listScroll.scroll_to_item(n === 1 ? 0 : n);
     this.resetScroll();
     this.read(cx);
     cx.notify();
@@ -461,6 +540,47 @@ export default class Lific extends View {
     run("mod.open", { name: "send-box" });
   }
 
+  // Carry out what the request box says. The box empties at once so the next
+  // can be typed; a request that fails goes back into it.
+  sendRequest(cx) {
+    const text = (this.req.value() ?? "").trim();
+    if (!text) return;
+    const command = shared(AGENT)?.command;
+    if (!command) { this.said = { ok: false, text: "No Lific agent is chosen yet: pick one on Config → Lific." }; cx.notify(); return; }
+    const job = { id: ++this.count, text, project: this.project };
+    this.runs.push(job);
+    this.said = null; this.leaving = false;
+    this.req.set_value("");
+    cx.notify();
+    cx.spawn(async (cx) => {
+      let said = "", failed = null;
+      try {
+        const r = await exec("sh", ["-c", `printf %s "$1" | ${command}`, "sh", word(text, job.project, this.projects, this.hints.at(-1))], { cwd: this.cwd ?? home(), timeout: 300_000 });
+        said = tail(r.stdout);
+        if (r.code !== 0 || !said) failed = tail(r.stderr || r.stdout, 2) || `exit ${r.code}, no answer`;
+      } catch (e) { failed = String(e?.message ?? e); }
+      this.runs = this.runs.filter((x) => x !== job);
+      if (failed) {
+        this.said = { ok: false, text: failed };
+        if (!(this.req.value() ?? "").trim()) this.req.set_value(text);
+        this.oops("The Lific request was not carried out", failed);
+      } else {
+        this.said = { ok: true, text: said };
+        notify({ title: "Lific", body: said.length > 240 ? `${said.slice(0, 240)}…` : said, level: "success", timeout: 6000 });
+        // Show what it touched: the first identifier it names that is a project's.
+        const id = (said.match(/\b[A-Z][A-Z0-9]*-\d+\b/g) ?? []).find((x) => this.projects.some((p) => p.identifier === x.slice(0, x.lastIndexOf("-"))));
+        if (id) {
+          this.reveal = id;
+          const project = id.slice(0, id.lastIndexOf("-"));
+          if (project !== this.project) this.pickProject(project, cx);
+        }
+        this.detail = {};
+        this.load(cx, true);
+      }
+      cx.notify();
+    });
+  }
+
   copy(cx) {
     const cur = this.current();
     if (!cur) return;
@@ -479,7 +599,12 @@ export default class Lific extends View {
     });
   }
 
-  close() { closeOverlay(props().overlay); }
+  // Closing while a request is being carried out would lose its answer (the
+  // agent still finishes): the first press says so, the next one closes.
+  close(cx) {
+    if (this.runs.length && !this.leaving) { this.leaving = true; cx?.notify(); return; }
+    closeOverlay(props().overlay);
+  }
 
   keys(e, cx) {
     const k = e.key, m = e.modifiers ?? {};
@@ -499,6 +624,12 @@ export default class Lific extends View {
       if (k === "escape") { this.endPrompt(cx); cx.stop_propagation(); }
       return;
     }
+    if (this.asking) {
+      // Escape steps back out of the request box and keeps what was typed.
+      if (k === "escape") { this.asking = false; this.handle.focus(); cx.stop_propagation(); cx.notify(); }
+      return;
+    }
+    if (e.keystroke === "cmd-enter") { this.sendRequest(cx); cx.stop_propagation(); return; }
     if (this.searching) {
       // Arrows still pick while you type; esc steps back out of the field, a second one clears the search.
       if (k === "escape") { this.searching = false; this.handle.focus(); cx.stop_propagation(); cx.notify(); }
@@ -510,6 +641,7 @@ export default class Lific extends View {
     const done = () => cx.stop_propagation();
     const page = Math.max(LINE * 4, this.size.height - LINE * 3);
     if (k === "/" || e.key_char === "/") { this.search.focus(); cx.notify(); return done(); }
+    if (e.key_char === ":" && !shared("curtain")?.on) { this.req.focus(); cx.notify(); return done(); }
     if (k === "escape" && this.query) { this.clearSearch(cx); return done(); }
     if (k === "tab") { this.toggleMode(cx); return done(); }
     if (k === "space") { this.scrollBy(m.shift ? -page : page, cx); return done(); }
@@ -547,8 +679,9 @@ export default class Lific extends View {
       enter: () => this.hand(), i: () => this.hand(),
       n: () => this.ask("new", cx), y: () => this.copy(cx), o: () => this.web(cx),
       r: () => this.load(cx, true),
-      q: () => this.close(), escape: () => this.close(),
+      q: () => this.close(cx), escape: () => this.close(cx),
     };
+    if (k !== "escape" && k !== "q") this.leaving = false;
     if (map[k]) { map[k](); done(); }
   }
 
@@ -558,6 +691,18 @@ export default class Lific extends View {
     const list = this.list();
     const cur = this.current();
     if (cur && cur.identifier !== this.selected) { this.selected = cur.identifier; this.read(cx); }
+    const veiled = Boolean(shared("curtain")?.on); // the curtain is drawn: no agent, no request box
+    // The request key, pressed while this window is up: answer it and take the keyboard to the box.
+    const ask = shared(ASK);
+    if (ask?.n && ask.n !== this.asked) {
+      this.asked = ask.n;
+      if (!veiled && Date.now() - (ask.at ?? 0) < 5000) cx.spawn(async (cx) => {
+        setShared(ACK, ask.n);
+        const take = (cx) => { if (!this.prompt && !this.editing) this.req.focus(); cx.notify(); };
+        take(cx);
+        cx.timer.after(250, take); // again once the opener has gone, which hands the keyboard back
+      });
+    }
     const stop = (_e, cx) => cx.stop_propagation();
     const color = (s) => ({ active: t.working, todo: t.accent, backlog: t.dim, done: t.done, cancelled: t.muted, draft: t.dim, complete: t.done, archived: t.muted })[s] ?? t.dim;
     const dot = (s) => div().size(8).flex_none().rounded(4).bg(color(s));
@@ -599,6 +744,7 @@ export default class Lific extends View {
       }))
       .when(!this.projects.length, (e) => e.child(div().px(6).text_size(12.5).font_semibold().child("Lific")));
 
+    const drawn = this.entries(list), grouped = drawn.some((e) => e.head);
     const row = (i) => {
       const on = i.identifier === cur?.identifier;
       const closed = !isOpen(i.status);
@@ -610,15 +756,20 @@ export default class Lific extends View {
         .child(v_flex().flex_1().min_w(0).gap(1)
           .child(div().truncate().text_size(12.5).font_medium().text_color(closed ? t.muted : t.foreground).child(i.title))
           .child(div().truncate().text_size(11).text_color(t.muted)
-            .child([i.identifier, i.status, pages ? (i.workspace ? "workspace" : null) : (i.priority !== "none" ? i.priority : null), i.pinned ? "pinned" : null, ...(i.labels ?? [])].filter(Boolean).join(" · "))));
+            .child([i.identifier, grouped ? null : i.status, pages ? (i.workspace ? "workspace" : null) : (["low", "medium"].includes(i.priority) ? i.priority : null), i.pinned ? "pinned" : null, ...(i.labels ?? [])].filter(Boolean).join(" · "))))
+        .when(!pages && (i.priority === "urgent" || i.priority === "high"), (e) => e.child(div().flex_none().h(16).px(5).flex().items_center().rounded(4)
+          .bg(t.raised).text_size(10).font_medium().text_color(closed ? t.muted : i.priority === "urgent" ? t.blocked : t.ansi3).child(i.priority)));
     };
+    const head = (h) => h_flex().w_full().flex_none().h(24).px(10).pt(6).gap(6).items_center().text_size(10.5)
+      .child(div().font_semibold().text_color(color(h.head)).child((HEAD[h.head] ?? h.head).toUpperCase()))
+      .child(div().text_color(t.dim).child(String(h.count)));
 
     const empty = this.error ? this.error
-      : !this.loaded ? "Reading…"
+      : !this.loaded ? waiting(t, "Reading lific")
       : !this.projects.length ? "No lific projects yet. Create one with: lific project create"
       : this.query ? `Nothing matches "${this.query}".`
       : pages ? (this.pages.length ? "No pages here. Press f to change the filter." : "No pages yet. Press n to write one, tab for issues.")
-      : this.filter === "open" ? "No open issues. Press n to add one, f to see the rest."
+      : this.filter === "open" ? "No open issues. Press n to add one, : to ask for one in words, f to see the rest."
       : "Nothing here. Press f to change the filter.";
 
     const left = v_flex().w(LIST_W).flex_none().h_full().border_r(1).border_color(t.border)
@@ -631,7 +782,7 @@ export default class Lific extends View {
       .when(this.prompt === "new", (e) => e.child(field(this.input, "+", true)))
       .child(div().relative().flex_1().min_h(0)
         .child(v_flex().id("lf-list").absolute().inset_0().p(6).gap(2).overflow_y_scroll().track_scroll(this.listScroll)
-          .children(list.length ? list.map(row) : [div().p(12).text_size(12).text_color(this.error ? t.blocked : t.muted).child(empty)])));
+          .children(list.length ? drawn.map((e) => (e.head ? head(e) : row(e.item))) : [div().p(12).text_size(12).text_color(this.error ? t.blocked : t.muted).child(empty)])));
 
     const full = this.shown();
     const comments = cur && !pages ? (this.detail[cur.identifier]?.comments ?? []) : [];
@@ -699,12 +850,12 @@ export default class Lific extends View {
       ? [button("lf-save", this.editing === "comment" ? "Post" : "Save", "⌘↵", true, (cx) => this.saveArea(cx)),
          button("lf-cancel", "Cancel", this.areaFocused ? "esc esc" : "esc", false, (cx) => this.endEdit(cx))]
       : [button("lf-hand", "Send to pane", "↵", true, () => this.hand()),
-         button("lf-edit", "Edit", "e", false, (cx) => this.edit("text", cx)),
-         ...(pages ? [] : [button("lf-comment", "Comment", "c", false, (cx) => this.edit("comment", cx)),
-                           button("lf-prio", "Priority", "u", false, (cx) => this.nextPriority(cx))]),
-         button("lf-rename", "Rename", "R", false, (cx) => this.ask("rename", cx)),
-         button("lf-new", "New", "n", false, (cx) => this.ask("new", cx)),
-         button("lf-web", "Web", "o", false, (cx) => this.web(cx))];
+         chip("lf-edit", "Edit", "e", (cx) => this.edit("text", cx)),
+         ...(pages ? [] : [chip("lf-comment", "Comment", "c", (cx) => this.edit("comment", cx)),
+                           chip("lf-prio", "Priority", "u", (cx) => this.nextPriority(cx))]),
+         chip("lf-rename", "Rename", "R", (cx) => this.ask("rename", cx)),
+         chip("lf-new", "New", "n", (cx) => this.ask("new", cx)),
+         chip("lf-web", "Web", "o", (cx) => this.web(cx))];
 
     const right = v_flex().flex_1().min_w(0).h_full()
       .child(h_flex().px(12).h(38).flex_none().gap(8).items_center().border_b(1).border_color(t.border)
@@ -714,15 +865,38 @@ export default class Lific extends View {
           : div().flex_1().min_w(0).truncate().text_size(13).font_semibold().text_color(t.foreground).child(cur ? cur.title : "—"))
         .child(chip("lf-wide", this.wide ? "Show list" : "Read wide", "z", (cx) => { this.wide = !this.wide; cx.notify(); })))
       .child(div().flex_1().min_h(0).child(this.editing ? editor : reader))
-      .child(h_flex().px(10).h(44).flex_none().gap(8).items_center().border_t(1).border_color(t.border)
+      .child(h_flex().px(10).h(40).flex_none().gap(6).items_center().border_t(1).border_color(t.border)
         .children(actions)
         .child(div().flex_1())
-        .when(!this.editing, (e) => e.child(div().flex_none().text_size(10.5).text_color(t.dim).child("s status · J K space scroll")))
-        .child(button("lf-close", "Close", this.editing ? "" : "esc", false, () => this.close())));
+        .when(!this.editing, (e) => e.child(div().flex_none().text_size(10.5).text_color(t.dim).child("s status · J K space scroll · y copy")))
+        .child(chip("lf-close", "Close", this.editing ? "" : "esc", (cx) => this.close(cx))));
+
+    // The request box: one line until it is stepped into or holds more.
+    const draft = this.req.value() ?? "", agent = shared(AGENT);
+    const tall = this.asking || draft.includes("\n") || draft.length > 90;
+    const where = this.project ? `works in ${this.project} unless you name another project` : "name the project in your words";
+    const line = (mark, tint, text) => h_flex().flex_none().h(20).gap(8).items_center().text_size(11.5)
+      .child(mark).child(div().flex_1().min_w(0).truncate().text_color(tint).child(text));
+    const request = v_flex().flex_none().px(10).py(8).gap(6).border_t(1).border_color(t.border).bg(t.chrome)
+      .on_mouse_down("left", stop)
+      .children(this.runs.map((r) => line(waiting(t, div().flex_none().text_color(t.muted).child(r.project ? `Carrying out in ${r.project}` : "Carrying out")), t.dim, flat(r.text))))
+      .when(this.leaving && this.runs.length > 0, (e) => e.child(line(div().flex_none().font_semibold().text_color(t.ansi3).child("!"), t.ansi3, "Still being carried out: closing now loses its answer. Press esc again to close anyway.")))
+      .when(Boolean(this.said), (e) => e.child(line(div().flex_none().font_semibold().text_color(this.said.ok ? t.ansi2 : t.blocked).child(this.said.ok ? "✓" : "✕"), this.said.ok ? t.muted : t.blocked, flat(this.said?.text))))
+      .child(h_flex().gap(8).items_end()
+        .child(div().flex_none().h(34).flex().items_center().text_size(14).font_semibold().text_color(this.asking ? t.accent : t.dim).child(":"))
+        .child(div().id("lf-req").flex_1().min_w(0).h(tall ? 92 : 34).flex().cursor_text()
+          .child(Textarea.new(this.req).flex_1().min_h(0).px(10).py(7).rounded(8).border_1().border_color(this.asking ? t.accent : t.input).bg(t.background).text_size(13).text_color(t.foreground)))
+        .child(button("lf-run", "Run", "⌘↵", draft.trim().length > 0, (cx) => this.sendRequest(cx))))
+      .child(h_flex().gap(10).items_center().text_size(10.5).text_color(t.dim)
+        .child(div().flex_1().min_w(0).truncate().child(this.asking ? `⇧↵ new line · ⌘↵ run · esc leave the box · ${where}` : `: a Lific request, in your own words · ${where}`))
+        .child(div().id("lf-agent").flex_none().cursor_pointer().hover((st) => st.text_color(t.foreground))
+          .on_click(() => { setShared("config.page", "lific"); run("mod.open", { name: "config" }); })
+          .child(agent?.label ? `Lific agent: ${agent.label}` : "No Lific agent chosen · Config → Lific")));
 
     return v_flex().id("lf-root").size_full().bg(t.popover).text_color(t.foreground)
       .track_focus(this.handle).key_context("Lific").on_action("lific-escape", (_e, cx) => this.keys({ key: "escape", keystroke: "escape", modifiers: {} }, cx)).on_key_down((e, cx) => this.keys(e, cx))
       .child(strip)
-      .child(h_flex().flex_1().min_h(0).w_full().when(!this.wide, (e) => e.child(left)).child(right));
+      .child(h_flex().flex_1().min_h(0).w_full().when(!this.wide, (e) => e.child(left)).child(right))
+      .when(!veiled, (e) => e.child(request));
   }
 }

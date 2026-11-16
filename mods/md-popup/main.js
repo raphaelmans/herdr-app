@@ -8,11 +8,14 @@
 // to the hidden .cache folder, since image() only reads inside the app home.
 // Esc or q closes it. In a pane, e replaces the preview with Neovim.
 
-import { View, div, image } from "gpui-kit";
+import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex, TextView } from "gpui-base";
 import { appHome, checking, closeOverlay, exec, focused, nextCommand, notify, panes, props, readTextFile, run, theme, watchFolder } from "herdr";
 import * as fs from "fs/promises";
 import { renderMermaid, splitMermaid } from "./mermaid.js";
+
+// A wait: one spinner, turned natively, and what is being waited for.
+const waiting = (t, label) => h_flex().gap(8).items_center().child(svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900)).child(label);
 
 const CACHE = "mods/md-popup/.cache";
 
@@ -256,7 +259,7 @@ export default class MdPopup extends View {
               .justify_between()
               .child(div().flex_1().min_w(0).truncate().child(this.file ? basename(this.file) : "Markdown preview"))
               .when(this.inPane, el => el.child(div().id("md-edit").flex_none().px(10).py(4).rounded(5).bg(t.raised)
-                .child(this.opening ? "Opening Neovim…" : "Edit in Neovim · e")
+                .child(this.opening ? waiting(t, "Opening Neovim") : "Edit in Neovim · e")
                 .when(Boolean(this.file) && !this.opening, button => button.cursor_pointer().hover(s => s.bg(t.hover)).on_click((_e, cx) => this.edit(cx)))))
               .child(div().flex_none().pl(12).child("Esc / q to close")),
           )

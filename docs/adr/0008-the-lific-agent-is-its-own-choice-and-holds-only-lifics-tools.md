@@ -1,0 +1,7 @@
+# The Lific agent is its own choice and holds only Lific's tools
+
+A Lific request (typed in the Lific window's request box, `mods/lific/`) is carried out by a one-shot agent command, like the Writer's: the request on stdin, what was done on stdout. It is a separate choice (`lific.agent`, Config → Lific) rather than the Writer, because the Writer runs with no tools and the cheapest model, while this one acts and may want a stronger one. Each recipe names Lific's MCP server (`lific mcp`, stdio) in the command itself and gives the agent nothing else: no shell, no files, no other MCP server. We rejected relying on what `lific connect` wrote into each agent's own settings (it differs per machine and brings every other configured tool along) and rejected having the mod turn words into `lific` CLI calls itself (the agent already has the tracker's own tools and instructions).
+
+The request box is part of the Lific window, not a window of its own: the answer lands in the list being looked at, and the project shown is the one worked in unless the words name another. `mods/lific-request/` is only the opener behind the request key, since `mod.open:lific` alone would close a window that is up.
+
+**Consequences:** the Lific page reuses the Writer page's picker (`writer.js` takes a kind); a new agent needs a recipe in both. Codex needs `default_tools_approval_mode="approve"` for the server, or it refuses every tool call in `exec`. Health greets `lific mcp` with a real handshake, since a found binary does not show that. A custom command must bring the MCP itself.

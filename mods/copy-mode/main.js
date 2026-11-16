@@ -1,6 +1,9 @@
-import { View, div } from "gpui-kit";
+import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { closeOverlay, focused, hc, notify, props, run, settings, theme } from "herdr";
+
+// A wait: one spinner, turned natively, and what is being waited for.
+const waiting = (t, label) => h_flex().gap(8).items_center().child(svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900)).child(label);
 
 // tmux-style copy mode (vi keys) over a snapshot of a terminal's screen and history.
 // Herdr can't draw a cursor or set a selection on a live terminal, so this reads the
@@ -463,7 +466,7 @@ export default class CopyMode extends View {
       .child(v_flex().id("copy-body").flex_1().min_h(0).overflow_hidden().relative()
         .on_mouse_down("left", (e, cx) => this.click(e, cx))
         .on_scroll_wheel((e, cx) => this.wheel(e, cx))
-        .when(this.loading, (d) => d.child(div().p(PAD).text_color(t.muted).child(`Reading ${this.terminal}…`)))
+        .when(this.loading, (d) => d.child(div().p(PAD).text_color(t.muted).child(waiting(t, `Reading ${this.terminal}`))))
         .when(Boolean(this.error), (d) => d.child(div().p(PAD).text_color(t.ansi1).child(this.error)).child(div().px(PAD).text_color(t.dim).child("Esc to close")))
         .children(visible)
         .when(!this.loading && !this.error, (d) => d.child(div().absolute().top(2).right(PAD).px(6).rounded(4).bg(t.raised).text_color(t.accent).text_size(12)
