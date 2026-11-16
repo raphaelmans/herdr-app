@@ -1,0 +1,3 @@
+{ "place": "none", "title": "Agent hub", "focusable": true, "overlay": { "kind": "window", "key": "agent-hub", "width": 940, "height": 500 },
+  "spec": {"needs": ["hc"]}
+}

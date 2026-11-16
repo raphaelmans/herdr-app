@@ -1,0 +1,1 @@
+{ "place": "none", "title": "Fork agent session", "overlay": { "kind": "dialog", "width": 440, "height": 120, "frame": "none" }, "spec": { "needs": ["hc"] } }

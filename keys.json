@@ -15,7 +15,7 @@
     "cmd-[": "agent.prev",
     "cmd-shift-l": "layout.switch",
     "cmd-n": "space.new",
-    "cmd-p": "mod.open:picker",
+    "cmd-p": "mod.open:go-to",
     "cmd-shift-p": "app.palette",
     "cmd-,": "app.settings",
     "cmd-d": "pane.split:right",
@@ -58,9 +58,17 @@
     "ctrl-8": "space.select:8",
     "ctrl-9": "space.select:9",
     "ctrl-a": "mod.open:tmux-prefix",
-    "cmd-e": "mod.open:herdr-nvim",
-    "cmd-o": "herdr-nvim.pick",
-    "cmd-shift-e": "herdr-nvim.reveal"
+    "cmd-e": "nvim-pane.toggle",
+    "cmd-o": "mod.open:file-picker",
+    "cmd-shift-e": "nvim-pane.show",
+    "cmd-alt-t": "mod.open:auto-title",
+    "cmd-i": "mod.open:send-box",
+    "cmd-g": "mod.open:git",
+    "cmd-j": "mod.open:agent-hub",
+    "cmd-shift-a": "mod.open:viz",
+    "cmd-alt-a": "viz.annotate",
+    "cmd-shift-m": "mod.open:config",
+    "cmd-shift-h": "curtain.toggle"
   },
   "terminal": {
     "cmd-c": "terminal.copy",
@@ -74,7 +82,28 @@
     "cmd-backspace": "send:\u0015",
     "ctrl-a": "mod.open:tmux-prefix"
   },
+  "layout:mine": {
+    "cmd-]": "curtain.agent-next",
+    "cmd-[": "curtain.agent-prev",
+    "cmd-alt-]": "curtain.space-next",
+    "cmd-alt-[": "curtain.space-prev",
+    "cmd-p": "curtain.open-go-to",
+    "cmd-j": "curtain.open-agent-hub",
+    "cmd-alt-t": "curtain.open-auto-title",
+    "ctrl-1": "curtain.space-1",
+    "ctrl-2": "curtain.space-2",
+    "ctrl-3": "curtain.space-3",
+    "ctrl-4": "curtain.space-4",
+    "ctrl-5": "curtain.space-5",
+    "ctrl-6": "curtain.space-6",
+    "ctrl-7": "curtain.space-7",
+    "ctrl-8": "curtain.space-8",
+    "ctrl-9": "curtain.space-9"
+  },
   "mod:tmux-prefix": {
     "ctrl-a": "tmux-prefix.send-prefix"
+  },
+  "mod:go-to": {
+    "cmd-shift-a": "go-to.toggle-scope"
   }
 }

@@ -2,26 +2,84 @@
 # frame/, icons/, shipped layouts and mods, state files). Track only what's ours.
 *
 !.gitignore
-!README.md
+!/README.md
+!GLOSSARY.md
 !keys.json
 !settings.json
-!programs.json
+!launcher.json
+!health.sh
+!DEFAULTS.md
+!CLAUDE.md
+!docs/
+docs/*
+!docs/adr/
+!docs/adr/*.md
+# Herdr's reference files as of the last maintenance run (ADR 0007)
+!MAINTENANCE.md
+!docs/baseline/
+!docs/baseline/*
 
 !layouts/
 layouts/*
-!layouts/main-copy.json
+!layouts/mine.json
+!layouts/mine.png
 
 !mods/
 mods/*
+# One line per mod of mine that keys.json, the layout or another tracked mod
+# uses. A mod missing here is silently absent from a fresh checkout.
 !mods/tmux-prefix/
+!mods/go-to/
+!mods/workspace-navigation/
 !mods/copy-mode/
-!mods/herdr-nvim/
-!mods/herdr-nvim/bin/
-!mods/herdr-nvim-header/
+!mods/launcher/
+!mods/agent-fork/
+!mods/agent-hub/
+!mods/send-box/
+!mods/nvim-pane/
+!mods/pane-header/
+!mods/spaces-sections/
+!mods/auto-title/
+!mods/git/
+!mods/viz/
+!mods/config/
+!mods/lific/
+!mods/stayawake/
+!mods/jira/
+!mods/agents-titled/
+!mods/curtain/
+!mods/status-bar/
+!mods/tab-bar/
+!mods/tab-sequence/
+!mods/pane-move/
+!mods/toasts/
+!mods/skillshare/
+!mods/file-picker/
+!mods/md-popup/
+!mods/lazygit/
 !mods/*/*.js
 !mods/*/mod.json
+!mods/config/vendored.json
+!mods/config/requirements.json
 !mods/*/*.svg
-!mods/herdr-nvim/bin/*
+!mods/*/*-LICENSE
+!mods/auto-title/install.*
+!mods/viz/CONTEXT.md
+!mods/git/PARITY.md
+!mods/file-picker/README.md
+!mods/viz/herdr-viz
+!mods/stayawake/stayawake.sh
+!mods/skillshare/icons/
+!mods/skillshare/icons/*.svg
+
+# Mods that are off (Config → Mods moves the folder here). One listed here is
+# off in a fresh checkout; while it is on, git shows it moved to mods/.
+!mods-disabled/
+mods-disabled/*
+!mods-disabled/jira/
+!mods-disabled/*/*.js
+!mods-disabled/*/mod.json
+!mods-disabled/*/*.svg
 
 # Written by the app / editor tooling
 *.d.ts

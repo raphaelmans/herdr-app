@@ -1,0 +1,3 @@
+{ "place": "none", "title": "Lific", "focusable": true, "overlay": { "kind": "window", "key": "lific", "width": 1180, "height": 740 },
+  "spec": {"needs": ["lific"]}
+}

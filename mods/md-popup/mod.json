@@ -1,0 +1,12 @@
+{
+  "place": "none",
+  "title": "Markdown preview",
+  "overlay": {
+    "kind": "dialog",
+    "width": 960,
+    "height": 1,
+    "frame": "none"
+  },
+  "focusable": true,
+  "spec": {"extras": ["nvim"]}
+}

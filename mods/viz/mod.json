@@ -1,0 +1,3 @@
+{ "place": "none", "title": "Visuals", "focusable": true, "overlay": { "kind": "popup", "width": 1, "height": 1, "frame": "none" },
+  "spec": {"needs": ["git"], "extras": ["herdr-viz", "node", "chrome"]}
+}

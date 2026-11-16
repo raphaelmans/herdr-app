@@ -1,0 +1,209 @@
+#!/usr/bin/env node
+// herdr-viz: publish an artifact (a standalone document: prose plus embeds) beside the agent in Herdr.
+// Vocabulary: ~/.config/herdr-app/mods/viz/CONTEXT.md. Drawing: ~/.config/herdr-app/mods/viz/.
+//
+//   herdr-viz <doc.md> [--title "..."] [--update <id>] [--size 1200x800]
+//   herdr-viz - [--title "..."] [--update <id>]          markdown document from stdin
+//   herdr-viz <file.svg|png|jpg|html|mmd> [--title ...]   an artifact holding just that one embed
+//   herdr-viz list [--all]                                artifacts in this project (or all): id, title, updated
+//
+// In the document, an embed is a line of its own:
+//   ```mermaid ... ```        diagram
+//   ![caption](chart.svg)     chart or image (svg, png, jpg, gif, webp), path relative to the document
+//   ![caption](page.html)     page preview: captured with headless Chrome, openable live
+// Everything else is prose (markdown: headings, text, lists, tables, code).
+// Publishing overwrites: --update <id> replaces that artifact's whole content (no history).
+
+const fs = require("fs");
+const path = require("path");
+const os = require("os");
+const { execFileSync } = require("child_process");
+
+let stage = null; // the half-built artifact folder, removed if publishing fails
+const die = (msg) => {
+  if (stage) try { require("fs").rmSync(stage, { recursive: true, force: true }); } catch {}
+  process.stderr.write(`herdr-viz: ${msg}\n`);
+  process.exit(1);
+};
+const USAGE = `usage:
+  herdr-viz <doc.md | file.svg|png|jpg|html|mmd> [--title "..."] [--update <id>] [--size WxH]
+  herdr-viz - [--title "..."] [--update <id>]     (markdown from stdin)
+  herdr-viz list [--all]`;
+
+const APP = process.env.HERDR_APP_HOME || path.join(os.homedir(), ".config/herdr-app");
+const LIB = path.join(APP, "mods/viz/.artifacts");
+const CURRENT = path.join(APP, "mods/viz/.current");
+const IMAGE = new Set([".svg", ".png", ".jpg", ".jpeg", ".gif", ".webp"]);
+const PAGE = new Set([".html", ".htm"]);
+
+const writeAtomic = (p, data) => { fs.writeFileSync(`${p}.tmp`, typeof data === "string" ? data : JSON.stringify(data, null, 2)); fs.renameSync(`${p}.tmp`, p); };
+const slugify = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "artifact";
+
+function projectOf(cwd) {
+  try { return execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() || cwd; }
+  catch { return cwd; }
+}
+
+function readMetas() {
+  if (!fs.existsSync(LIB)) return [];
+  return fs.readdirSync(LIB).filter((d) => !d.startsWith(".")).map((d) => {
+    try { return JSON.parse(fs.readFileSync(path.join(LIB, d, "meta.json"), "utf8")); } catch { return null; }
+  }).filter(Boolean).sort((a, b) => String(b.updated).localeCompare(String(a.updated)));
+}
+
+// ---- args ----------------------------------------------------------------------------------
+const args = process.argv.slice(2);
+const opt = { title: null, size: null, update: null, all: false, src: null };
+for (let i = 0; i < args.length; i++) {
+  const a = args[i];
+  if (a === "-h" || a === "--help") { console.log(USAGE); process.exit(0); }
+  else if (a === "--title") opt.title = args[++i];
+  else if (a === "--size") opt.size = args[++i];
+  else if (a === "--update") opt.update = args[++i];
+  else if (a === "--all") opt.all = true;
+  else if (opt.src === null) opt.src = a;
+  else die(`unexpected argument ${a}\n${USAGE}`);
+}
+if (!opt.src) die(USAGE);
+
+if (opt.src === "list") {
+  const project = projectOf(process.cwd());
+  const rows = readMetas().filter((m) => opt.all || m.project === project);
+  if (!rows.length) { console.log(opt.all ? "no artifacts" : `no artifacts in ${project} (try --all)`); process.exit(0); }
+  for (const m of rows) console.log(`${m.id}\t${m.title}\t${m.updated}${m.archived ? "\tarchived" : ""}${opt.all ? `\t${m.project}` : ""}`);
+  process.exit(0);
+}
+
+const terminal = process.env.HC_TERMINAL_ID;
+if (!terminal) die("not inside a Herdr terminal ($HC_TERMINAL_ID is unset), so there is no pane to show this beside.");
+
+// ---- the document --------------------------------------------------------------------------
+let doc, docDir, base;
+if (opt.src === "-") {
+  doc = fs.readFileSync(0, "utf8");
+  docDir = process.cwd();
+  base = "artifact";
+} else {
+  if (!fs.existsSync(opt.src) || !fs.statSync(opt.src).isFile()) die(`no such file: ${opt.src}`);
+  const ext = path.extname(opt.src).toLowerCase();
+  docDir = path.dirname(path.resolve(opt.src));
+  base = path.basename(opt.src, path.extname(opt.src));
+  if (ext === ".md" || ext === ".markdown") doc = fs.readFileSync(opt.src, "utf8");
+  else if (ext === ".mmd" || ext === ".mermaid") doc = "```mermaid\n" + fs.readFileSync(opt.src, "utf8").trim() + "\n```\n";
+  else if (IMAGE.has(ext) || PAGE.has(ext)) doc = `![${opt.title || base}](${path.basename(opt.src)})\n`;
+  else die(`can't publish ${ext || "this"} files; use a markdown document, or one svg, png/jpg, html or mermaid file`);
+}
+
+const heading = /^#\s+(.+)$/m.exec(doc)?.[1]?.trim();
+let existing = null;
+if (opt.update) {
+  existing = readMetas().find((m) => m.id === opt.update);
+  if (!existing) die(`no artifact ${opt.update} (see: herdr-viz list)`);
+}
+const title = opt.title || heading || existing?.title || base;
+const id = existing?.id ?? `${new Date().toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15)}-${slugify(title)}-${Math.random().toString(36).slice(2, 6)}`;
+const dir = path.join(LIB, id);
+
+// Overwrite: build the new content in a fresh folder, then swap it in.
+stage = path.join(LIB, `.stage-${id}-${process.pid}`);
+fs.mkdirSync(stage, { recursive: true });
+
+function imageSize(p, ext) {
+  if (ext === ".svg") {
+    const s = fs.readFileSync(p, "utf8");
+    const vb = /viewBox\s*=\s*["']\s*[-\d.]+[\s,]+[-\d.]+[\s,]+([\d.]+)[\s,]+([\d.]+)/i.exec(s);
+    const w = /<svg[^>]*\swidth\s*=\s*["']([\d.]+)(px)?["']/i.exec(s);
+    const h = /<svg[^>]*\sheight\s*=\s*["']([\d.]+)(px)?["']/i.exec(s);
+    return { w: w ? +w[1] : vb ? +vb[1] : 800, h: h ? +h[1] : vb ? +vb[2] : 600 };
+  }
+  try {
+    const out = execFileSync("sips", ["-g", "pixelWidth", "-g", "pixelHeight", p], { encoding: "utf8" });
+    return { w: +/pixelWidth: (\d+)/.exec(out)[1], h: +/pixelHeight: (\d+)/.exec(out)[1] };
+  } catch { return { w: 800, h: 600 }; }
+}
+
+function capture(htmlPath, pngPath) {
+  const [W, H] = (opt.size || "1200x800").split("x").map(Number);
+  if (!W || !H) die(`bad --size ${opt.size}; use WxH like 1200x800`);
+  const chrome = process.env.HERDR_VIZ_CHROME || [
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/Applications/Google Chrome Dev.app/Contents/MacOS/Google Chrome Dev",
+    "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+    "/Applications/Chromium.app/Contents/MacOS/Chromium",
+  ].find((c) => fs.existsSync(c));
+  if (!chrome) { process.stderr.write("herdr-viz: no Chrome found to capture a page preview (set HERDR_VIZ_CHROME).\n"); return null; }
+  let dark = false;
+  try { dark = /Dark/.test(execFileSync("defaults", ["read", "-g", "AppleInterfaceStyle"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] })); } catch {}
+  const profile = fs.mkdtempSync(path.join(os.tmpdir(), "herdr-viz-"));
+  try {
+    execFileSync(chrome, [
+      "--headless=new", "--disable-gpu", "--hide-scrollbars", "--no-first-run", "--no-default-browser-check",
+      `--user-data-dir=${profile}`, "--force-device-scale-factor=2", `--window-size=${W},${H}`, "--virtual-time-budget=4000",
+      ...(dark ? ["--force-dark-mode", "--blink-settings=preferredColorScheme=0"] : []),
+      `--screenshot=${pngPath}`, `file://${htmlPath}`,
+    ], { stdio: "ignore", timeout: 45000 });
+  } catch {}
+  fs.rmSync(profile, { recursive: true, force: true });
+  if (!fs.existsSync(pngPath)) { process.stderr.write(`herdr-viz: couldn't capture ${path.basename(htmlPath)}; its embed still opens live.\n`); return null; }
+  return { w: W, h: H };
+}
+
+// Copy every embed the document references and point the document at the copies.
+const embeds = {};
+const used = new Set();
+let inFence = false, fenceMark = "";
+const lines = doc.split("\n").map((line) => {
+  const fence = /^\s*(`{3,}|~{3,})/.exec(line);
+  if (fence) {
+    if (!inFence) { inFence = true; fenceMark = fence[1][0]; }
+    else if (fence[1][0] === fenceMark) inFence = false;
+    return line;
+  }
+  if (inFence) return line;
+  const m = /^(\s*)!\[([^\]]*)\]\(([^)\s]+)\)\s*$/.exec(line);
+  if (!m || /^[a-z]+:\/\//i.test(m[3])) return line;
+  const src = path.resolve(docDir, decodeURI(m[3]));
+  const ext = path.extname(src).toLowerCase();
+  if (!(IMAGE.has(ext) || PAGE.has(ext))) return line;
+  if (!fs.existsSync(src)) die(`the document embeds ${m[3]}, which doesn't exist (paths are relative to the document)`);
+  let name = `${slugify(path.basename(src, ext))}${ext}`;
+  for (let i = 2; used.has(name); i++) name = `${slugify(path.basename(src, ext))}-${i}${ext}`;
+  used.add(name);
+  fs.copyFileSync(src, path.join(stage, name));
+  if (PAGE.has(ext)) {
+    const preview = name.replace(/\.[^.]+$/, ".preview.png");
+    const size = capture(path.join(stage, name), path.join(stage, preview));
+    embeds[name] = { kind: "page", ...(size ? { preview, ...size } : {}) };
+  } else {
+    embeds[name] = { kind: ext === ".svg" ? "chart" : "image", ...imageSize(path.join(stage, name), ext) };
+  }
+  return `${m[1]}![${m[2]}](${name})`;
+});
+writeAtomic(path.join(stage, "artifact.md"), lines.join("\n"));
+
+const cwd = process.cwd();
+const now = new Date().toISOString();
+const meta = {
+  id, title, project: existing?.project ?? projectOf(cwd), cwd: existing?.cwd ?? cwd,
+  created: existing?.created ?? now, updated: now, publishedBy: terminal,
+  archived: existing?.archived ?? false, embeds,
+};
+writeAtomic(path.join(stage, "meta.json"), meta);
+
+// Swap: the old content goes, the new folder takes its name.
+if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
+fs.renameSync(stage, dir);
+stage = null;
+
+// This agent's artifact pane now shows this artifact.
+fs.mkdirSync(CURRENT, { recursive: true });
+const key = terminal.replace(/[^A-Za-z0-9_-]/g, "_");
+writeAtomic(path.join(CURRENT, `${key}.json`), { terminal, id });
+writeAtomic(path.join(CURRENT, ".request.json"), { terminal, at: Date.now() });
+try {
+  execFileSync("herdr-app", ["do", "mod.open", JSON.stringify({ name: "viz" })], { stdio: "ignore", timeout: 10000 });
+} catch {
+  process.stderr.write("herdr-viz: published, but couldn't reach the Herdr app to show it (is it running?).\n");
+}
+console.log(`${existing ? "updated" : "published"} ${id}  "${title}"`);
+console.log(`update it later with: herdr-viz <doc.md> --update ${id}`);

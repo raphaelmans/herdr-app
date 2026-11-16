@@ -1,0 +1,29 @@
+{
+  "program": "terminal",
+  "programs": {
+    "claude": {
+      "flag": "--dangerously-skip-permissions",
+      "on": true,
+      "model": "claude-fable-5-2",
+      "reasoning": {
+        "claude-opus-5-5": "medium",
+        "claude-fable-5-2": "medium"
+      }
+    },
+    "codex": {
+      "flag": "--dangerously-bypass-approvals-and-sandbox",
+      "on": true,
+      "model": "",
+      "reasoning": {
+        "gpt-6-astra": "max"
+      }
+    }
+  },
+  "worktree": {
+    "base": "default",
+    "open": "tab"
+  },
+  "title": {
+    "command": "MAX_THINKING_TOKENS=0 claude -p --model claude-haiku-5-5 --tools='' --disable-slash-commands --setting-sources='' --system-prompt='' --no-session-persistence"
+  }
+}

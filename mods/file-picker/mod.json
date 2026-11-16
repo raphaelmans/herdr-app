@@ -1,0 +1,3 @@
+{ "place": "none", "title": "Find a file", "overlay": { "kind": "dialog", "width": 900, "height": 650 },
+  "spec": {"needs": ["fd"], "extras": ["rg", "nvim"]}
+}

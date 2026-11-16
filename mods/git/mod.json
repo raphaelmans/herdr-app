@@ -1,0 +1,3 @@
+{ "place": "none", "title": "Git", "focusable": true, "overlay": { "kind": "dialog", "width": 0.9, "height": 0.88 },
+  "spec": {"needs": ["git", "sh"], "extras": ["lazygit", "nvim"]}
+}
