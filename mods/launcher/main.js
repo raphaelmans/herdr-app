@@ -4,6 +4,8 @@
 // An agent can carry its first message (m): optional, empty starts the agent
 // with nothing said. `pane.split` has no `task`, so a split gets the message as
 // the agent's last argument, which is what Herdr's `task` does for a tab.
+// Copilot reads that bare argument as a subcommand, so its first message
+// follows `-i` (`--interactive`) and the session stays open.
 // The message also takes files: dropped on the dialog, or pasted from the
 // clipboard with ⌃V (a copied file, or an image, which is saved first). Their
 // paths go after the text, so files alone are a message too. This computer only.
@@ -64,6 +66,25 @@ const DEFAULTS = {
 // How each agent is told its model: the flag that goes before the model's id.
 // An agent with none here, and none in launcher.json, is started without one.
 const MODEL_FLAG = { claude: "--model", codex: "-m", opencode: "-m", cursor: "--model", gemini: "-m", copilot: "--model", pi: "--model" };
+// The flag that introduces a first message. Absent: Herdr appends the message
+// as the last argument, which Claude Code and Codex accept. Copilot does not.
+const MESSAGE_FLAG = { copilot: "-i" };
+// Herdr's `task` is always the last argument. An agent in MESSAGE_FLAG needs
+// its flag immediately before that, on a tab, a space and a split alike.
+function withMessageFlag(key, argv, task) {
+  const flag = MESSAGE_FLAG[key];
+  if (!argv || !flag || !task) return argv;
+  return [...argv, flag];
+}
+function splitArgv(argv, task) {
+  if (!argv) return undefined;
+  if (!task) return argv;
+  return [...argv, task];
+}
+function agentFields(name, key, argv, task) {
+  if (!argv) return {};
+  return { [key]: name, argv, ...task };
+}
 // The agent's own choice: the model each agent starts with when told none, as
 // its own settings on that machine say. Prints "<agent key><tab><model>" lines;
 // an agent whose settings name none prints nothing after the tab. A folder's
@@ -603,16 +624,24 @@ export default class Launcher extends View {
         props: { source: this.fork, target: { key: program.key, name: program.name, run: program.run, argv, ...task } } });
       return;
     }
+    // Fork keeps the first message out of argv: a handover carries it in the
+    // text, and a native fork has its own place for it.
+    const launched = withMessageFlag(program.key, argv, task.task);
     if (this.split()) {
       this.close();
-      run("pane.split", { direction: this.place(), ...(this.pane ? { pane: this.pane } : {}), ...(argv ? { argv: task.task ? [...argv, task.task] : argv } : {}) });
+      const args = splitArgv(launched, task.task);
+      run("pane.split", {
+        direction: this.place(),
+        ...(this.pane ? { pane: this.pane } : {}),
+        ...(args ? { argv: args } : {}),
+      });
       return;
     }
     // A new tab in the folder offered: nothing to look up first.
     const typed = this.folder.value().trim();
     if (!this.wt && this.place() === "tab" && (!typed || typed === this.offered)) {
       this.close();
-      run("tab.new", { space: this.space, ...(argv ? { name: program.name, argv, ...task } : {}) });
+      run("tab.new", { space: this.space, ...agentFields(program.name, "name", launched, task) });
       return;
     }
     let row = this.wt ? this.rows()[this.at] : null;
@@ -625,8 +654,9 @@ export default class Launcher extends View {
       try {
         const folder = await this.settle(cx);
         if (!this.wt) {
-          if (this.place() === "space") run("space.new", { machine: this.on ?? "", ...(folder ? { folder } : {}), ...(argv ? { tab: program.name, argv, ...task } : {}) });
-          else run("tab.new", { space: this.space, ...(folder ? { folder } : {}), ...(argv ? { name: program.name, argv, ...task } : {}) });
+          const fields = agentFields(program.name, this.place() === "space" ? "tab" : "name", launched, task);
+          if (this.place() === "space") run("space.new", { machine: this.on ?? "", ...(folder ? { folder } : {}), ...fields });
+          else run("tab.new", { space: this.space, ...(folder ? { folder } : {}), ...fields });
           return this.close();
         }
         if (row.sentence) {
@@ -636,7 +666,7 @@ export default class Launcher extends View {
         }
         this.status = `worktrunk is making ${row.branch}…`;
         cx.notify();
-        this.error = await this.worktree(row, program, argv, task);
+        this.error = await this.worktree(row, program, launched, task);
       }
       catch (error) { this.error = String(error?.message ?? error); }
       this.busy = false;

@@ -17,6 +17,9 @@
       "reasoning": {
         "gpt-6-astra": "max"
       }
+    },
+    "copilot": {
+      "model": "gpt-6.1-sol"
     }
   },
   "worktree": {
