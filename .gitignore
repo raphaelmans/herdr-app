@@ -14,6 +14,9 @@
 docs/*
 !docs/adr/
 !docs/adr/*.md
+# Finished research the mods cite (merged from the research/* branches)
+!docs/research/
+!docs/research/*.md
 # Herdr's reference files as of the last maintenance run (ADR 0007)
 !MAINTENANCE.md
 !docs/baseline/

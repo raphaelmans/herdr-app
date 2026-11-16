@@ -6,8 +6,8 @@
 
 This spec is frozen at the current build while the parity route is planned. Planning lives in the wayfinder map, [GitHub issue #2](https://github.com/raphaelmans/herdr-app/issues/2), which is paused. The tables below describe what exists; the audits on that map measured it against Lazygit's pinned source:
 
-- **Keybindings:** of 115 list-panel bindings, 69 match, 31 deviate and 15 are missing. Of about 150 commit, global, main-panel and menu bindings, about 55 match, 50 deviate and 45 are missing. Details: [list panels](https://github.com/raphaelmans/herdr-app/blob/research/keybindings-list-panels/research/keybindings-list-panels.md), [commits and global](https://github.com/raphaelmans/herdr-app/blob/research/keybindings-commits-global/research/keybindings-commits-global.md).
-- **Configuration:** every pinned key is read; about 35 settings and about 133 of 170 keybinding names affect behaviour. No legacy-key migrations are applied. [Details](https://github.com/raphaelmans/herdr-app/blob/research/config-coverage/research/config-coverage.md).
+- **Keybindings:** of 115 list-panel bindings, 69 match, 31 deviate and 15 are missing. Of about 150 commit, global, main-panel and menu bindings, about 55 match, 50 deviate and 45 are missing. Details: [list panels](../../docs/research/keybindings-list-panels.md), [commits and global](../../docs/research/keybindings-commits-global.md).
+- **Configuration:** every pinned key is read; about 35 settings and about 133 of 170 keybinding names affect behaviour. No legacy-key migrations are applied. [Details](../../docs/research/config-coverage.md).
 - **Deliberate or undecided deviations** (open decisions on the map): commit rewrites (`s` `f` `d` `e` `r`) open a reviewed rebase plan instead of acting at once; `i` starts from the selected commit (Lazygit's `e` semantics); several Lazygit menus are a single prompt here (`r` rebase, `w` new worktree, Worktrees `d`, branch `u`, Files `D` and `S`); about 17 keys mean something else natively; native adds confirmations Lazygit lacks (Space checkout, every `g` mode, CommitFiles `c`).
 
 ### Known bugs
@@ -18,7 +18,7 @@ This spec is frozen at the current build while the parity route is planned. Plan
 - Ctrl-O in Commit files copies `undefined`. Elsewhere Ctrl-O copies a full commit hash where Lazygit copies 12 characters, and it does nothing outside commits.
 - The `?` help table says `D` discards all changes; `D` opens the reset menu. It also omits several keys that exist (Files `c` `C` `r` `S`; Stash `n` `r` `w` `enter`).
 
-Research on [submodules and nested repositories](https://github.com/raphaelmans/herdr-app/blob/research/submodules-nested-repos/research/submodules-nested-repos.md) holds the design inputs for the first three.
+Research on [submodules and nested repositories](../../docs/research/submodules-nested-repos.md) holds the design inputs for the first three.
 
 ## Where to find things
 
