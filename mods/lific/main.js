@@ -117,6 +117,7 @@ export default class Lific extends View {
     this.detail = {};      // identifier -> { issue, comments }
     this.error = null;
     this.loaded = false;
+    this.loadedAt = 0;
     this.query = "";
     this.wide = false;     // z: the list is hidden
     this.top = 0;          // first text part in view (an estimate), for keyboard scrolling
@@ -179,10 +180,22 @@ export default class Lific extends View {
     if (checking()) return; // a check draws the window; it runs no lific
     if (wanted) setShared(ACK, ask.n);
     this.start(cx);
-    cx.timer.every(REFRESH_MS, (cx) => { if (this.project && !this.busy()) this.load(cx); });
+    // No timer reads in the background (ADR 0009): the list is read again when
+    // the window is come back to (it takes the keyboard, or the pointer moves
+    // over it after a click raised it) and what it shows is older than REFRESH_MS.
     cx.spawn(async (cx) => {
-      for (;;) { const c = await nextCommand(); if (c === "focus" && !this.busy()) { this.handle.focus(); cx.notify(); } }
+      for (;;) {
+        const c = await nextCommand();
+        if (c !== "focus" || this.busy()) continue;
+        this.handle.focus();
+        this.freshen(cx);
+        cx.notify();
+      }
     });
+  }
+
+  freshen(cx) {
+    if (this.project && !this.loading && !this.busy() && Date.now() - this.loadedAt > REFRESH_MS) this.load(cx);
   }
 
   // Typing somewhere: keys belong to that field, and nothing reloads under it.
@@ -266,6 +279,7 @@ export default class Lific extends View {
         }
         this.error = null;
         this.loaded = true;
+        this.loadedAt = Date.now();
         cx.notify();
         this.read(cx);
       } catch (e) { this.fail(e, cx); } finally { this.loading = false; }
@@ -894,7 +908,7 @@ export default class Lific extends View {
           .child(agent?.label ? `Lific agent: ${agent.label}` : "No Lific agent chosen · Config → Lific")));
 
     return v_flex().id("lf-root").size_full().bg(t.popover).text_color(t.foreground)
-      .track_focus(this.handle).key_context("Lific").on_action("lific-escape", (_e, cx) => this.keys({ key: "escape", keystroke: "escape", modifiers: {} }, cx)).on_key_down((e, cx) => this.keys(e, cx))
+      .track_focus(this.handle).on_mouse_move((_e, cx) => this.freshen(cx)).key_context("Lific").on_action("lific-escape", (_e, cx) => this.keys({ key: "escape", keystroke: "escape", modifiers: {} }, cx)).on_key_down((e, cx) => this.keys(e, cx))
       .child(strip)
       .child(h_flex().flex_1().min_h(0).w_full().when(!this.wide, (e) => e.child(left)).child(right))
       .when(!veiled, (e) => e.child(request));

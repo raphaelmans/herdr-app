@@ -24,7 +24,9 @@ export default class WorkspaceStatus extends View {
     const veiled = Boolean(shared("curtain")?.on);
     const hidden = new Set((shared("spaces.sections")?.sections ?? []).filter((s) => s.hidden).flatMap((s) => s.members));
     const list = agents().filter((a) => !hidden.has(a.space));
-    const needs = list.filter(a => a.status === "blocked").length;
+    // A snoozed agent asks for nothing until it wakes (published by mods/agents-titled).
+    const asleep = new Set(shared("agents.snoozing") ?? []);
+    const needs = list.filter(a => a.status === "blocked" && !asleep.has(a.address)).length;
     const label = (icon, text) => h_flex().gap(6).items_center().child(svg(`mods/workspace-chrome/${icon}.svg`).size(13)).child(text);
     return h_flex().size_full().px(14).gap(16).items_center().bg(t.chrome).border_t(1).border_color(t.border).text_size(11.8).text_color(t.muted)
       .child(label(space?.machine ? "server" : "monitor", space?.machine ?? "This computer"))

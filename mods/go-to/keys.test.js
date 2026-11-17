@@ -12,7 +12,7 @@ async function open() {
   const tab = (id) => ({ id, name: id, active: id === "one" });
   const herdr = {
     spaces: () => [{ id: "a", name: "a", active: true, tabs: [tab("one"), tab("two"), tab("three")] }],
-    agents: () => [], terminals: () => [], focused: () => ({ space: "a" }), shared: () => undefined, setShared() {},
+    agents: () => [], terminals: () => [], shared: () => undefined, setShared() {},
     props: () => ({ overlay: 1 }), closeOverlay: () => { w.closed++; }, run: (name, args) => w.commands.push({ name, args }),
   };
   const base = { View: class {}, InputState: { new: () => {
@@ -42,9 +42,9 @@ test("opens in NORMAL: vim motions move and clamp, l goes", async () => {
   press("j"); press("j");
   assert.equal(picker.at, 2);
   press("G");
-  assert.equal(picker.at, 3); // the "new tab" row, last
+  assert.equal(picker.at, 4); // the "new space" row, last
   press("j");
-  assert.equal(picker.at, 3);
+  assert.equal(picker.at, 4);
   press("g"); press("k");
   assert.equal(picker.at, 0);
   press("j"); press("l");

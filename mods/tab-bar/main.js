@@ -5,7 +5,7 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex, ScrollHandle } from "gpui-base";
-import { spaces, panes, run, openOverlay, theme, window, shared, layout, settings } from "herdr";
+import { spaces, panes, focused, run, openOverlay, theme, window, shared, layout, settings } from "herdr";
 
 // The curtain's rule, the same in mods/curtain and spaces-sections.
 // An agent: a terminal that reports a status, or runs a program Herdr can start
@@ -66,6 +66,9 @@ export default class Tabs extends View {
     const t = theme();
     const space = spaces().find(p => p.active);
     const veiled = Boolean(shared("curtain")?.on), ps = panes(), keys = agentKeys();
+    // Snoozed agents, as the Agents sidebar (mods/agents-titled) publishes them.
+    const asleep = new Set(veiled ? [] : shared("agents.snoozing") ?? []);
+    const here = focused()?.pane;
     const shown = (space?.tabs ?? []).filter(tab => !veiled || !hiddenTab(tab, ps, keys));
     const active = shown.findIndex(tab => tab.active);
     const selected = shown[active]?.id;
@@ -79,9 +82,15 @@ export default class Tabs extends View {
       .on_mouse_down("left", stop).on_click(action).child(label);
     const item = (c, i) => {
       const mine = ps.filter(p => p.tab === c.id);
+      // The agent a right-click acts on: on the shown tab the focused one, else the tab's first.
+      const them = veiled ? [] : mine.filter(p => isAgent(p, keys));
+      const agent = (c.active && them.find(p => p.pane === here)) || them[0] || null;
       const program = veiled ? mine.find(p => !isAgent(p, keys))?.program : mine.find(p => p.program?.agent)?.program ?? mine[0]?.program;
       const name = /^tb\d+$/.test(c.name) ? program?.name ?? "Terminal" : c.name;
-      return h_flex().id(`tab-${c.id}`).h(29).px(10).gap(7).rounded(7).items_center().flex_none().text_size(12.8)
+      // A snoozed tab shrinks to its program's icon and its number; the name is in its tooltip.
+      // On the shown tab the focused agent decides; elsewhere every agent in it must be snoozed.
+      const sleeping = asleep.size > 0 && them.length > 0 && (c.active && agent?.pane === here ? asleep.has(agent.terminal) : them.every(p => asleep.has(p.terminal)));
+      return h_flex().id(`tab-${c.id}`).h(29).px(sleeping ? 8 : 10).gap(sleeping ? 5 : 7).rounded(7).items_center().flex_none().text_size(12.8)
         // A rename or status dot on this or an earlier tab can push the active one out.
         .when(i <= active, el => el.on_size_change((_size, cx) => { this.scroll.scroll_to_item(active); cx.notify(); }))
         .border(1).border_color(c.active ? t.border : t.chrome).bg(c.active ? t.raised : t.chrome).text_color(c.active ? t.foreground : t.muted)
@@ -92,12 +101,20 @@ export default class Tabs extends View {
           if (from !== null && from !== i) run("tab.move", { id: shown[from].id, index: space.tabs.findIndex(x => x.id === c.id) + 1 });
           else run("tab.select", { id: c.id });
         })
-        .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); openOverlay({ mod: "menu", kind: "popup", width: 200, props: { tab: "tab", target: { id: c.id, space: space.id } } }); })
+        .on_mouse_down("right", (_e, cx) => {
+          cx.stop_propagation();
+          const tab = { id: c.id, space: space.id };
+          // A tab with an agent gets the agent's menu (mods/agents-titled) with the tab's items
+          // under it: 6 rows, a rule and padding. Any other tab gets Herdr's own tab menu.
+          if (agent) openOverlay({ mod: "agents-titled", kind: "popup", width: 200, height: 205, props: { rowMenu: { address: agent.terminal, asleep: asleep.has(agent.terminal), tab } } });
+          else openOverlay({ mod: "menu", kind: "popup", width: 200, props: { tab: "tab", target: tab } });
+        })
         .when(Boolean(program?.icon), el => el.child(program.tint ? svg(program.icon).size(14).text_color(t.muted) : image(program.icon).size(14)))
-        .child(div().max_w(170).truncate().child(c.zoomed ? `${name} Z` : name))
-        .when(!veiled && c.status === "working", el => el.child(svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900)))
-        .when(!veiled && (c.status === "blocked" || c.status === "done"), el => el.child(div().size(6).rounded(3).bg(t[c.status])))
-        .when(c.active, el => el.child(div().id(`close-${c.id}`).text_color(t.dim).on_mouse_down("left", stop).on_click((_e, cx) => { cx.stop_propagation(); run("tab.close", { id: c.id }); }).child(svg("mods/pane/close.svg").size(12))));
+        .when(sleeping, el => el.tooltip(`${name} · Snoozed`).child(div().flex_none().text_color(t.dim).child(String(c.index))))
+        .when(!sleeping, el => el.child(div().max_w(170).truncate().child(c.zoomed ? `${name} Z` : name)))
+        .when(!sleeping && c.status === "working" && !veiled, el => el.child(svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900)))
+        .when(!sleeping && !veiled && (c.status === "blocked" || c.status === "done"), el => el.child(div().size(6).rounded(3).bg(t[c.status])))
+        .when(c.active && !sleeping, el => el.child(div().id(`close-${c.id}`).text_color(t.dim).on_mouse_down("left", stop).on_click((_e, cx) => { cx.stop_propagation(); run("tab.close", { id: c.id }); }).child(svg("mods/pane/close.svg").size(12))));
     };
     const root = layout(), sidebar = find(root, "sidebar"), w = window();
     // Old saved rails and a dragged-narrow sidebar can be smaller than the window buttons.

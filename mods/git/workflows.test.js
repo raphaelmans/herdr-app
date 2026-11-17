@@ -1027,7 +1027,7 @@ test('history extends without losing selection or discarding newer commits',()=>
   let stream='blob\nmark :1\ndata 1\nx\n';
   for(let i=0;i<305;i++){const message=`commit ${i}`;stream+=`commit refs/heads/main\ncommitter Test <test@example.invalid> ${1700000000+i} +0000\ndata ${message.length}\n${message}\nM 100644 :1 f\n\n`;}
   git(['fast-import','--quiet'],stream);git(['reset','--hard']);await refresh();assert.equal(app.commits.length,300);assert.equal(app.moreCommits,true);
-  app.panel='commits';app.sel.commits=290;app.pageCommits(1,cx);await flush();assert.equal(app.commits.length,305);assert.equal(app.moreCommits,false);assert.equal(app.commits[304].subject,'commit 0');assert.equal(app.sel.commits,290);assert.equal(app.commits[0].subject,'commit 304');
+  app.panel='commits';app.sel.commits=290;app.pageCommits(cx);await flush();assert.equal(app.commits.length,305);assert.equal(app.moreCommits,false);assert.equal(app.commits[304].subject,'commit 0');assert.equal(app.sel.commits,290);assert.equal(app.commits[0].subject,'commit 304');
 }));
 
 test('custom patch can split a root commit',()=>harness(async({dir,git,put,app,cx,refresh,flush})=>{

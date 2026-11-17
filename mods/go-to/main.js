@@ -1,7 +1,6 @@
-// Opens in this space; Cmd+Shift+A toggles all spaces and preserves the search.
-// Go to a tab in a content-sized popup, capped by the window with vertical insets. Spaces with
-// something that needs you come first, quiet spaces (no agent running)
-// fold into "earlier". Last rows: new work (a tab here, a space on this
+// Go to a tab in any space, in a content-sized popup capped by the window with vertical
+// insets. Spaces with something that needs you come first, then the one you are in;
+// other quiet spaces (no agent running) fold into "earlier". Last rows: new work (a tab here, a space on this
 // computer or on each connected machine).
 //
 // Keys follow Find a file (Cmd+O): it opens in NORMAL, where j/k g/G move,
@@ -12,7 +11,7 @@
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { agents, spaces, terminals, focused, nextCommand, run, hc, theme, settings, props, closeOverlay, shared, setShared } from "herdr";
+import { agents, spaces, terminals, run, hc, theme, settings, props, closeOverlay, shared, setShared } from "herdr";
 
 const MARK = { ansi6: "#22a99a", ansi3: "#e3814f", ansi4: "#5b8def", ansi5: "#8b7cf6", ansi2: "#3fae6a", ansi1: "#d9649a" };
 
@@ -49,7 +48,7 @@ const HELP = [
   "Page Down / Page Up: a page at a time",
   "l / Enter: go     / or i: search",
   "Ctrl+J / Ctrl+K or Ctrl+N / Ctrl+P: move while searching",
-  "Ctrl+D: close the selected tab     ⌘⇧A: this space / all spaces",
+  "Ctrl+D: close the selected tab",
   "q: close     ?: help     Esc / q: leave help",
 ];
 
@@ -65,8 +64,6 @@ export default class Picker extends View {
     this.typing = false;
     this.help = false;
     this.pageRows = 10;
-    this.space = focused()?.space ?? spaces().find((s) => s.active)?.id ?? null;
-    this.all = false;
     this.filter = "";
     this.input = InputState.new({ placeholder: "Go to a tab, space or agent…" });
     this.input.on("change", (_e, cx) => {
@@ -85,12 +82,6 @@ export default class Picker extends View {
     // The popup takes the keyboard a moment after it opens; claim it again.
     this.handle.focus();
     for (const ms of [100, 600]) cx.timer.after(ms, () => { if (!this.typing) this.handle.focus(); });
-    cx.spawn(async (cx) => {
-      for (;;) {
-        const command = await nextCommand();
-        if (command === "toggle-scope") this.toggleScope(cx);
-      }
-    });
     cx.spawn(async (cx) => {
       try {
         const r = await hc(["machine", "ls", "--json"]);
@@ -174,18 +165,6 @@ export default class Picker extends View {
     cx.stop_propagation();
   }
 
-  toggleScope(cx) {
-    const selected = this.rows().filter((r) => r.kind !== "head")[this.at]?.ctx?.id;
-    this.all = !this.all;
-    this.showEarlier = false;
-    this.scroll = 0;
-    const pickable = this.rows().filter((r) => r.kind !== "head");
-    const retained = selected ? pickable.findIndex((r) => r.ctx?.id === selected) : -1;
-    this.at = retained >= 0 ? retained : Math.max(0, pickable.findIndex((r) => r.kind === "ctx"));
-    this.refocus();
-    cx.notify();
-  }
-
   rows() {
     const hidden = new Set((shared("spaces.sections")?.sections ?? []).filter((s) => s.hidden).flatMap((s) => s.members));
     const f = this.filter.toLowerCase();
@@ -202,7 +181,7 @@ export default class Picker extends View {
       addrs.forEach(walk);
       return n;
     };
-    const groups = spaces().filter((w) => !hidden.has(w.id) && (this.all || w.id === this.space)).map((w) => {
+    const groups = spaces().filter((w) => !hidden.has(w.id)).map((w) => {
       const ctxs = w.tabs
         .map((ctx) => {
           const mine = all.filter((a) => a.tab === ctx.id);
@@ -211,27 +190,24 @@ export default class Picker extends View {
         .filter((c) => !f || [w.name, c.ctx.name, ...c.mine.map((a) => a.program?.name ?? "")].join(" ").toLowerCase().includes(f));
       return { w, ctxs };
     });
-    const busy = groups.filter((p) => p.w.status && p.ctxs.length);
-    const quiet = groups.filter((p) => !p.w.status && p.ctxs.length);
+    // The space you are in never folds away: Go to opens on it.
+    const shown = (p) => p.w.status || p.w.active;
+    const busy = groups.filter((p) => shown(p) && p.ctxs.length);
+    const quiet = groups.filter((p) => !shown(p) && p.ctxs.length);
     busy.sort((a, b) => (b.w.status === "blocked") - (a.w.status === "blocked"));
     const out = [];
     const add = (p) => {
       out.push({ kind: "head", w: p.w });
       for (const c of p.ctxs) out.push({ kind: "ctx", ...c });
     };
-    if (!this.all) groups.filter((p) => p.ctxs.length).forEach(add);
-    else {
-      busy.forEach(add);
-      if (quiet.length) {
-        out.push({ kind: "earlier", count: quiet.length });
-        if (this.showEarlier || f) quiet.forEach(add);
-      }
+    busy.forEach(add);
+    if (quiet.length) {
+      out.push({ kind: "earlier", count: quiet.length });
+      if (this.showEarlier || f) quiet.forEach(add);
     }
     out.push({ kind: "new" });
-    if (this.all) {
-      out.push({ kind: "space", machine: null });
-      for (const m of this.machines) out.push({ kind: "space", machine: m });
-    }
+    out.push({ kind: "space", machine: null });
+    for (const m of this.machines) out.push({ kind: "space", machine: m });
     return out;
   }
 
@@ -381,13 +357,6 @@ export default class Picker extends View {
       .on_key_down((e, cx) => this.keys(e, cx))
       .child(h_flex().h(24).flex_none().items_center().gap(10)
         .child(div().flex_1().text_size(15).font_semibold().text_color(t.foreground).child("Go to…"))
-        .child(h_flex().id("picker-scope").h(24).px(8).gap(8).items_center().rounded(6)
-          .border_1().border_color(this.all ? t.accent : t.border).bg(t.raised)
-          .text_size(11).text_color(t.foreground).cursor_pointer()
-          .hover((s) => s.bg(t.hover))
-          .on_click((_e, cx) => this.toggleScope(cx))
-          .child(this.all ? "All spaces" : "This space")
-          .child(div().text_color(t.dim).child("⌘⇧A")))
         .child(div().id("picker-esc").px(6).py(2).rounded(5).text_size(11).text_color(t.dim).cursor_pointer()
           .hover((s) => s.bg(t.hover).text_color(t.foreground)).on_click(() => this.close()).child("Esc")))
       .child(

@@ -76,11 +76,35 @@ function titleOf(stdout) {
   return text.length > 60 ? `${text.slice(0, 57).trimEnd()}…` : text;
 }
 
+// Snoozed: an agent set aside from the row menu. The label on its terminal holds
+// its turn and status then ("7:done"); it wakes by itself once it starts another
+// turn or comes to need you, so nothing has to clear it. This mod alone reads the
+// label; it publishes who is snoozed as shared "agents.snoozing" (addresses) for
+// the tab bar and the status bar.
+const SNOOZE_LABEL = "agents.snoozed";
+const SNOOZING = "agents.snoozing";
+const snoozed = (k) => {
+  const [turn, status] = String(k?.labels?.[SNOOZE_LABEL] ?? "").split(":");
+  if (!turn || String(k.turn ?? "") !== turn) return false;
+  return !(k.status === "blocked" && status !== "blocked");
+};
+
+// The agent menu, opened from a row here or from a tab (mods/tab-bar), which
+// adds the tab's own items. `ask` hands the work to this mod's sidebar copy,
+// where it outlives the popup.
+const ask = (command, address) => { setShared(`agents.${command}`, address); run(`agents-titled.${command}`); };
 const ROW_MENU = [
-  { id: "rename", label: "Rename tab", icon: "mods/workspace-chrome/square-pen.svg" },
-  { id: "retitle", label: "Regenerate title", icon: "mods/agents-titled/sparkles.svg" },
-  { id: "pin", label: "Pin to the top", icon: "mods/workspace-chrome/pin.svg" },
+  { id: "rename", label: "Rename tab", icon: "mods/workspace-chrome/square-pen.svg", go: (a) => run("tab.rename", { id: a.tab }) },
+  { id: "retitle", label: "Regenerate title", icon: "mods/agents-titled/sparkles.svg", go: (a) => ask("retitle", a.address) },
+  { id: "pin", label: "Pin to the top", icon: "mods/workspace-chrome/pin.svg", go: (a) => run("terminal.pin", { terminal: a.address, pinned: !a.pinned }) },
+  { id: "snooze", label: "Snooze", icon: "mods/agents-titled/moon.svg", go: (a) => ask("snooze", a.address) },
 ];
+const TAB_MENU = [
+  { id: "new", label: "New tab", icon: "mods/workspace-chrome/plus.svg", rule: true, go: (_a, tab) => run("tab.new", { space: tab.space }) },
+  { id: "close", label: "Close tab", icon: "mods/workspace-chrome/x.svg", go: (_a, tab) => run("tab.close", { id: tab.id }) },
+];
+// The menu's height for its items, so the popup fits them.
+const menuHeight = (fromTab) => 10 + 31 * (ROW_MENU.length + (fromTab ? TAB_MENU.length : 0)) + (fromTab ? 9 : 0);
 
 // Space marks: a space's first letter on its color, as the spaces sidebar and
 // Go to draw them. Colors are kept by space id in shared "space.colors" (a
@@ -114,7 +138,7 @@ const SORTS = [
   { id: "grouped", label: "Grouped by space", icon: "layers" },
 ];
 const sortOf = () => SORTS.find((s) => s.id === shared("agents.sort")) ?? SORTS[0];
-const SECTION = { 4: "Needs you", 3: "Done", 2: "Working", 1: "Idle" };
+const SECTION = { 4: "Needs you", 3: "Done", 2: "Working", 1: "Idle", 0: "Snoozed" };
 const SECTION_STATUS = { 4: "blocked", 3: "done", 2: "working" };
 
 function duration(ms) {
@@ -143,15 +167,16 @@ export default class Agents extends View {
     this.folded = new Set();
     // Agents whose title is being written now.
     this.titling = new Set();
-    // A row's menu is another copy of this mod: it names the agent in shared
-    // state and sends "retitle" here, where the work outlives the popup.
+    // A row's menu (another copy of this mod) and the tab bar name the agent in
+    // shared state and send "retitle" or "snooze" here, where the work outlives them.
     cx.spawn(async (cx) => {
       for (;;) {
         const command = await nextCommand();
-        const address = shared("agents.retitle");
-        if (command !== "retitle" || typeof address !== "string") continue;
-        setShared("agents.retitle", null);
-        this.retitle(address, cx);
+        if (command !== "retitle" && command !== "snooze") continue;
+        const key = `agents.${command}`, address = shared(key);
+        if (typeof address !== "string") continue;
+        setShared(key, null);
+        this[command](address, cx);
       }
     });
     // Each agent's last state and when it changed (ms), kept across restarts.
@@ -271,19 +296,25 @@ export default class Agents extends View {
     });
   }
 
-  // A row's right-click menu: j/k or the arrows move, Enter runs, Esc closes.
+  // Snoozes the agent, or wakes it when it is snoozed.
+  snooze(address) {
+    const k = terminals().find((x) => x.address === address);
+    if (!k) return;
+    const asleep = snoozed(k);
+    hc(["label", address, `${SNOOZE_LABEL}=${asleep ? "" : `${k.turn ?? ""}:${k.status ?? ""}`}`]).then((r) => {
+      if (r.code !== 0) notify({ title: asleep ? "Could not wake the agent" : "Could not snooze the agent", body: (r.stderr || r.stdout).trim().split("\n").pop(), level: "warning" });
+    });
+  }
+
+  // An agent's menu, from its row or its tab: j/k or the arrows move, Enter runs, Esc closes.
   rowMenu(t) {
-    const target = props().rowMenu;
-    const a = agents().find((x) => x.address === target.address);
-    const list = ROW_MENU.map((it) => (it.id === "pin" && a?.pinned ? { ...it, label: "Unpin", icon: "mods/workspace-chrome/pin-off.svg" } : it));
+    const { address, asleep, tab } = props().rowMenu;
+    const a = agents().find((x) => x.address === address);
+    const list = [...ROW_MENU, ...(tab ? TAB_MENU : [])].map((it) => (it.id === "pin" && a?.pinned ? { ...it, label: "Unpin", icon: "mods/workspace-chrome/pin-off.svg" }
+      : it.id === "snooze" && asleep ? { ...it, label: "Wake" } : it));
     const choose = (it) => {
       closeOverlay(props().overlay);
-      if (!a) return;
-      if (it.id === "retitle") {
-        setShared("agents.retitle", a.address);
-        run("agents-titled.retitle");
-      } else if (it.id === "rename") run("tab.rename", { id: a.tab });
-      else run("terminal.pin", { terminal: a.address, pinned: !a.pinned });
+      if (a) it.go(a, tab);
     };
     return v_flex()
       .id("row-menu")
@@ -304,7 +335,9 @@ export default class Agents extends View {
         else return;
         cx.notify();
       })
-      .children(list.map((it, i) => h_flex()
+      .children(list.map((it, i) => v_flex()
+        .when(Boolean(it.rule), (el) => el.child(div().mx(7).my(4).h(1).bg(t.border)))
+        .child(h_flex()
         .id(`rm-${it.id}`)
         .h(31)
         .px(8)
@@ -316,7 +349,7 @@ export default class Agents extends View {
         .hover((el) => el.bg(t.hover))
         .on_click(() => choose(it))
         .child(svg(it.icon).size(14).flex_none().text_color(t.muted))
-        .child(div().flex_1().child(it.label))));
+        .child(div().flex_1().child(it.label)))));
   }
 
   // Live sub-agents of `addr`, depth first, each with the tree lines in front of it.
@@ -359,6 +392,7 @@ export default class Agents extends View {
 
   // compact: a ! for blocked where a header already says "Needs you".
   status(t, a, compact = false) {
+    if (a.address && this.snoozing?.has(a.address)) return svg("mods/agents-titled/moon.svg").size(12).mx(1).flex_none().text_color(t.dim);
     const color = t[a.status] ?? t.dim;
     if (a.status === "working") return svg("mods/workspace-chrome/spinner.svg").size(12).mx(1).flex_none().text_color(t.working).spin(900);
     if (a.status === "blocked" && compact) return div().size(14).flex_none().rounded(4).bg(t.blocked + "26").text_size(10.5).font_bold().text_color(t.blocked).flex().items_center().justify_center().child("!");
@@ -384,12 +418,17 @@ export default class Agents extends View {
     const excluded = new Set(known.filter((a) => hidden.has(a.space)).map((a) => a.address));
     // Kept children can belong to another space. Break their branch of the
     // tree if that space is Hidden, even when their parent remains visible.
-    const all = terminals().filter((t) => {
+    const everyTerminal = terminals();
+    const all = everyTerminal.filter((t) => {
       const space = t.labels?.["herdr.space"];
       const prefix = t.address.slice(0, t.address.lastIndexOf("/") + 1);
       return !excluded.has(t.address) && !(space && hidden.has(prefix + space));
     });
     this.migratePins(all);
+    const snoozing = everyTerminal.filter(snoozed).map((k) => k.address);
+    this.snoozing = new Set(snoozing);
+    // Only when it changes: setting shared state re-renders every mod.
+    if (snoozing.join(" ") !== (shared(SNOOZING) ?? []).join(" ")) setShared(SNOOZING, snoozing);
     const shown = focused()?.agent;
     const now = Date.now();
     this.track(list, now);
@@ -402,7 +441,8 @@ export default class Agents extends View {
     // Rows whose tab holds more than one of them: the tab's name can't be theirs.
     this.sharing = new Set(list.filter((a) => tabCounts.get(a.tab) > 1).map((a) => a.address));
     const byPriority = sort.id === "priority";
-    const urgency = new Map(list.map((a) => [a.address, Math.max(this.rank(a), ...this.tree(all, a.address).map((s) => RANK[kidStatus(s.t, this.listed)] ?? 0))]));
+    // A snoozed row quiets its sub-agents too.
+    const urgency = new Map(list.map((a) => [a.address, this.snoozing.has(a.address) ? 0 : Math.max(this.rank(a), ...this.tree(all, a.address).map((s) => RANK[kidStatus(s.t, this.listed)] ?? 0))]));
     const rankOf = (a) => urgency.get(a.address);
     if (byPriority) list = [...list].sort((x, y) => rankOf(y) - rankOf(x) || this.since(y) - this.since(x) || y.seq - x.seq);
     const pinned = list.filter((a) => a.pinned);
@@ -499,7 +539,8 @@ export default class Agents extends View {
           .child(h_flex().w(14).flex_none().items_center().justify_center().child(this.status(t, a, true)));
       }
       const when = this.since(a);
-      const idle = a.status === "idle" && !a.focused;
+      const asleep = this.snoozing.has(a.address);
+      const idle = (asleep || a.status === "idle") && !a.focused;
       const isPinned = a.pinned;
       const pin = div()
         .id(`pin-${a.address}`)
@@ -549,7 +590,7 @@ export default class Agents extends View {
         .on_click(() => run("pane.focus", { pane: a.pane }))
         .on_mouse_down("right", (_e, cx) => {
           cx.stop_propagation();
-          openOverlay({ mod: "agents-titled", kind: "popup", width: 200, height: 110, props: { rowMenu: { address: a.address } } });
+          openOverlay({ mod: "agents-titled", kind: "popup", width: 200, height: menuHeight(false), props: { rowMenu: { address: a.address, asleep: this.snoozing.has(a.address) } } });
         })
         .when(Boolean(pic), el => el.child(div().id(`agent-fold-${a.address}`)
           .when(subs.length > 0, el => el.on_click((_e, cx) => {
@@ -578,7 +619,7 @@ export default class Agents extends View {
     // space are next to each other in agents(), so neighbours make a group.
     const groups = pinned.length ? [{ id: "pinned", label: "Pinned", status: null, members: pinned }] : [];
     for (const a of rest) {
-      const r = rankOf(a) || RANK.idle;
+      const r = this.snoozing.has(a.address) ? 0 : rankOf(a) || RANK.idle;
       const id = byPriority ? `sec-${r}` : `sp-${a.space}`;
       if (groups.at(-1)?.id === id) groups.at(-1).members.push(a);
       else groups.push({ id, label: byPriority ? SECTION[r] : a.space_name || "", status: byPriority ? SECTION_STATUS[r] : null, members: [a] });
@@ -587,7 +628,7 @@ export default class Agents extends View {
     // A group's header; it folds the group. Folded, it says how many and the most urgent state.
     const header = (g) => {
       const open = !this.folded.has(g.id);
-      const top = g.members.reduce((m, a) => ((RANK[a.status] ?? 0) > (RANK[m] ?? 0) ? a.status : m), null);
+      const top = g.members.filter((a) => !this.snoozing.has(a.address)).reduce((m, a) => ((RANK[a.status] ?? 0) > (RANK[m] ?? 0) ? a.status : m), null);
       return h_flex()
         .id(g.id)
         .px(8)

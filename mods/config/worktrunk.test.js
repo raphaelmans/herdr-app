@@ -57,6 +57,16 @@ async function fixture(t) {
       if (args[0] === "switch") return result(JSON.stringify({ path: root, branch: args.at(-1) }));
       throw new Error(`Unexpected wt command: ${args}`);
     }
+    // A script that runs wt list (the Launcher's): the real sh and jq, unchanged,
+    // with a stand-in wt first on PATH that prints the fixture's worktrees.
+    if (command === "sh" && /\bwt list\b/.test(args[1])) {
+      const bin = join(root, ".bin");
+      await fs.mkdir(bin, { recursive: true });
+      await fs.writeFile(join(bin, "wt"), '#!/bin/sh\nprintf %s "$WT_JSON"\n', { mode: 0o755 });
+      const json = JSON.stringify(w.worktrees ?? [{ branch: "main", path: root, kind: "worktree", is_main: true }]);
+      const r = spawnSync("sh", args, { env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, WT_JSON: json }, encoding: "utf8" });
+      return { code: r.status, stdout: r.stdout, stderr: r.stderr };
+    }
     if (command === "sh" && args[1].includes('mv "$1" "$2"')) {
       await fs.mkdir(dirname(args[4]), { recursive: true });
       await fs.rename(args[3], args[4]);

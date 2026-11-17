@@ -103,8 +103,5 @@
   },
   "mod:tmux-prefix": {
     "ctrl-a": "tmux-prefix.send-prefix"
-  },
-  "mod:go-to": {
-    "cmd-shift-a": "go-to.toggle-scope"
   }
 }

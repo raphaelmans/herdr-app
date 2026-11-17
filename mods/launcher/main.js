@@ -221,8 +221,7 @@ export default class Launcher extends View {
     this.input.on("focus", (_e, cx) => { this.inputFocused = true; this.combo = true; this.sync(); cx.notify(); });
     this.input.on("blur", (_e, cx) => { this.inputFocused = false; this.combo = false; cx.notify(); });
     // A new tab's or space's folder: where the focused pane is, until edited. Here, "~" stands for home.
-    const mine = this.on === null && this.cwd && inside(this.cwd, home());
-    this.offered = mine ? `~${this.cwd.slice(home().length)}` : this.cwd ?? "";
+    this.offered = this.cwd ? this.spelled(this.cwd) : "";
     this.folder = InputState.new({ value: this.offered, placeholder: "folder (empty: where Herdr starts it)" });
     this.folderFocused = false;
     this.folderScroll = ScrollHandle.new();
@@ -603,7 +602,7 @@ export default class Launcher extends View {
       try {
         const dir = await pickFolder({ prompt: "Start here" });
         if (dir) {
-          this.folder.set_value(inside(dir, home()) ? `~${dir.slice(home().length)}` : dir);
+          this.folder.set_value(this.spelled(dir));
           this.error = "";
         }
         this.wt ? this.input.focus() : this.handle.focus();
@@ -722,7 +721,7 @@ export default class Launcher extends View {
         if (read !== this.reads) return;
         if (r.code !== 0) {
           LISTS.delete(key);
-          if (NO_REPO.test(r.stderr)) { this.list = null; this.listError = this.noRepo(); this.sync(); return this.findRepos(cx); }
+          if (NO_REPO.test(r.stderr)) { this.list = null; this.listNoRepo = true; this.listError = this.noRepo(); this.sync(); return this.findRepos(cx); }
           throw new Error(clean(r.stderr) || "wt list failed.");
         }
         const chosen = this.opts[this.at];
@@ -740,7 +739,7 @@ export default class Launcher extends View {
         if (read !== this.reads) return;
         // A failed refresh leaves what was shown; a failed first read says why.
         if (!this.list) {
-          this.list = null;
+          this.list = null; this.listNoRepo = false;
           this.listError = String(error?.message ?? error).split("\n").slice(-3).join("\n");
           this.sync();
         }
@@ -789,7 +788,7 @@ export default class Launcher extends View {
   // What Enter can act on: the typed name first (unless it is a branch), then matches.
   // In no repository, the open repositories instead: the name typed waits for one.
   rows() {
-    if (this.list === null && this.listError === this.noRepo()) return this.repos ?? [];
+    if (this.list === null && this.listNoRepo) return this.repos ?? [];
     const typed = this.text.trim();
     if (!typed) return [{ branch: this.generated, typed: true, create: true, generated: true }, ...(this.list ?? [])];
     if (/\s/.test(typed)) return [{ branch: typed, typed: true, create: true, sentence: true }];
@@ -1285,7 +1284,7 @@ export default class Launcher extends View {
       .when(!this.wt && !this.messageFocused && !this.folderFocused, (el) => el.child(this.hint(t, "x")));
 
     const here = (this.list ?? []).find((w) => w.here)?.branch ?? "";
-    const noRepo = this.list === null && this.listError === this.noRepo();
+    const noRepo = this.list === null && this.listNoRepo;
     const from = `new branch from ${this.cfg?.worktree.base === "current" ? (here || "here") : (this.defaultBranch || "the default branch")}`;
     // One option: in the popup it is highlighted and clicked; under the closed field it says what Enter acts on.
     const option = (w, i, listed) => {

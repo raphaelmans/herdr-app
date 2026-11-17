@@ -119,12 +119,10 @@ test("Hidden suppresses section attention without removing its sidebar rows", as
   assert.doesNotMatch(textOf(head), /●/);
 });
 
-test("pickers omit Hidden in this-space and all-space scope, then restore it immediately", async () => {
+test("pickers omit Hidden (Go to across every space, the hub in either scope), then restore it immediately", async () => {
   const w = world();
   const picker = await load("go-to", w);
-  Object.assign(picker, { filter: "", space: "b", all: false, showEarlier: true, machines: [] });
-  assert.equal(picker.rows().filter((r) => r.kind === "ctx").length, 0);
-  picker.all = true;
+  Object.assign(picker, { filter: "", showEarlier: true, machines: [] });
   assert.deepEqual(Array.from(picker.rows().filter((r) => r.kind === "ctx"), (r) => r.w.id), ["a", "c"]);
   const hub = await load("agent-hub", w);
   Object.assign(hub, { query: "", space: "b", all: false });
@@ -194,7 +192,7 @@ test("agent sidebar, nested agents, team counts and status totals omit Hidden", 
   assert.deepEqual([...w.order].sort(), ["t1", "t3"]);
   assert.ok(!w.shared["agents.order"].includes("child"));
   const picker = await load("go-to", w);
-  Object.assign(picker, { filter: "", space: "a", all: true, showEarlier: true, machines: [] });
+  Object.assign(picker, { filter: "", showEarlier: true, machines: [] });
   assert.equal(picker.rows().find((r) => r.kind === "ctx" && r.w.id === "a").team, 0);
   const status = await load("status-bar", w);
   assert.match(textOf(status.render()), /2 agents/);

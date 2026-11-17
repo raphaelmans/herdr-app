@@ -223,6 +223,10 @@ _Avoid_: sort (that is the choice behind the order), ranking, priority
 One agent in a list of agents: its title on the first line, and under it, quieter, its space mark, its tab badge and its space.
 _Avoid_: entry, item, card
 
+**Snoozed**:
+An agent set aside on purpose: it asks for no attention, in the Agents sidebar, the tab bar or the status bar, until it starts another turn or comes to need you, or is woken.
+_Avoid_: muted, hidden (that is a section of spaces), dismissed, seen (Herdr's word for a done agent you looked at)
+
 **Space mark**:
 A space's first letter on the space's own color, in a small rounded square, so a space can be told apart at a glance wherever it is listed.
 _Avoid_: favicon, avatar, space icon, logo

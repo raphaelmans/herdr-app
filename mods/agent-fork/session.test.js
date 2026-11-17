@@ -52,11 +52,22 @@ async function harness({ key = "codex", on = null, status = "idle", exec: overri
   const stubs = {
     herdr: host,
     "gpui-kit": { View: class {}, div() {}, svg() {}, image() {} },
-    "gpui-base": { v_flex() {}, h_flex() {}, InputState: {}, Input: {}, TextareaState: {}, Textarea: {}, ScrollHandle: {} },
+    "gpui-base": { v_flex() {}, h_flex() {}, InputState: {}, Input: {}, TextareaState: {}, Textarea: {}, ScrollHandle: {}, Popup: {} },
+    "fs/promises": { exists: async () => false },
   };
+  // Host modules are stubs; a mod's own files (./x.js) are the real ones.
+  const loaded = new Map();
+  async function module(url) {
+    if (loaded.has(url.href)) return loaded.get(url.href);
+    const mod = new vm.SourceTextModule(await readFile(url, "utf8"), { context, identifier: url.href });
+    loaded.set(url.href, mod);
+    return mod;
+  }
   async function load(path) {
-    const mod = new vm.SourceTextModule(await readFile(new URL(path, import.meta.url), "utf8"), { context });
-    await mod.link((specifier) => {
+    loaded.clear(); // each load is a fresh copy, as before
+    const mod = await module(new URL(path, import.meta.url));
+    await mod.link((specifier, from) => {
+      if (specifier.startsWith(".")) return module(new URL(specifier, from.identifier));
       const stub = stubs[specifier];
       return new vm.SyntheticModule(Object.keys(stub), function () {
         for (const [key, value] of Object.entries(stub)) this.setExport(key, value);
