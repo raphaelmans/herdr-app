@@ -100,8 +100,8 @@ async function agentRows(writer, lific) {
   if (writer) {
     const label = shared("writer")?.label;
     rows.push(writer.path
-      ? { group: "agents", state: "ok", name: "Writer", tag: writer.program, text: `${label ? `${label}  —  ` : ""}commit summaries, branch names and agent titles`, fix: null }
-      : { group: "agents", state: "extra", name: "Writer", tag: "extra", text: `It runs ${writer.program}, which is not found: no commit summaries, branch names or agent titles are written.`, fix: "Choose another on the Writer page" });
+      ? { group: "agents", state: "ok", name: "Writer", tag: writer.program, text: `${label ? `${label}  —  ` : ""}worktree branch names and agent titles`, fix: null }
+      : { group: "agents", state: "extra", name: "Writer", tag: "extra", text: `It runs ${writer.program}, which is not found: no branch names or agent titles are written.`, fix: "Choose another on the Writer page" });
   }
   rows.push(...lific);
   return rows;

@@ -14,9 +14,6 @@
 docs/*
 !docs/adr/
 !docs/adr/*.md
-# Finished research the mods cite (merged from the research/* branches)
-!docs/research/
-!docs/research/*.md
 # Herdr's reference files as of the last maintenance run (ADR 0007)
 !MAINTENANCE.md
 !docs/baseline/
@@ -43,7 +40,6 @@ mods/*
 !mods/pane-header/
 !mods/spaces-sections/
 !mods/auto-title/
-!mods/git/
 !mods/viz/
 !mods/config/
 !mods/lific/
@@ -71,7 +67,6 @@ mods/*
 !mods/*/*-LICENSE
 !mods/auto-title/install.*
 !mods/viz/CONTEXT.md
-!mods/git/PARITY.md
 !mods/file-picker/README.md
 !mods/viz/herdr-viz
 !mods/stayawake/stayawake.sh

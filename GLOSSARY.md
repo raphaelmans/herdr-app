@@ -91,7 +91,7 @@ What Escape does in every mod: it leaves the focused component you stepped into 
 _Avoid_: cancel, dismiss, close (for Escape in general)
 
 **Text box**:
-A field for writing text that is sent or saved, longer than a name or a search: a first message, a message in the send box, a comment, an annotation. Enter and Shift+Enter start a new line in it; only Cmd+Enter sends or saves. A short field (a name, a branch, a commit summary, a search) keeps Enter.
+A field for writing text that is sent or saved, longer than a name or a search: a first message, a message in the send box, a comment, an annotation. Enter and Shift+Enter start a new line in it; only Cmd+Enter sends or saves. A short field (a name, a branch, a search) keeps Enter.
 _Avoid_: textarea, input, prompt (Herdr's naming dialog), editor
 
 ### Waiting and reading
@@ -283,28 +283,9 @@ _Avoid_: Writer (that one has no tools), bot, assistant, MCP (that is how it rea
 The agent and model chosen to write the short texts that mods ask for.
 _Avoid_: generator, title command, AI
 
-**Commit summary**:
-The one line that names a commit.
-_Avoid_: commit message, commit subject, title
-
 **Commit message**:
-The whole text of a commit: the commit summary and, for a larger change, a paragraph under it. Worktrunk has its own commit writer for these, which can follow the Writer.
-_Avoid_: commit summary (for the whole text)
-
-**Rebase plan**:
-An ordered list of commits and what to do with each: keep, reword, edit, squash, fix up or drop. Reviewing a plan does not change history; applying it does.
-
-**Custom patch**:
-Selected files, hunks or changed lines from a commit or comparison. It can be applied or reversed; a patch from one local commit can also be removed from that commit or split into a new commit.
-
-**List range**:
-A continuous set of selected rows in a Git list. A sticky range stays active during normal movement; a nonsticky range ends when normal movement resumes.
-
-**Commit details**:
-A commit's full identity, authorship, message and changed files, opened beneath its row in the Git graph.
-
-**Reference badge**:
-A branch, remote branch, tag or stash label on a commit in the Git graph. A local branch and its matching remotes can share one badge, with each segment selecting its own reference.
+The whole text of a commit: the one line that names it and, for a larger change, a paragraph under it. Worktrunk has its own commit writer for these, which can follow the Writer.
+_Avoid_: commit summary, commit subject (for the whole text)
 
 ### GitHub
 

@@ -1,6 +1,6 @@
 // Pull requests for a repository in a selected organization, on this computer.
 //
-// Its own spec needs gh. The Git dialog and lazygit do not. gh is this
+// Its own spec needs gh. gh is this
 // computer's copy (mise's shim when it is there, else the one on PATH), signed
 // in as this computer's GitHub account. Another machine's checkout is never asked.
 //

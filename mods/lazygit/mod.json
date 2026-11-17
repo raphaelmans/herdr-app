@@ -1,3 +1,1 @@
-{ "place": "none", "title": "lazygit", "overlay": { "kind": "popup", "width": 1, "height": 1, "frame": "none" },
-  "spec": {"extras": ["lazygit"]}
-}
+{"place": "none", "title": "lazygit", "overlay": {"kind": "popup", "width": 180, "height": 40, "frame": "none"}, "spec": {"needs": ["lazygit", "git", "hc", "sh"]}}

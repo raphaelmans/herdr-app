@@ -74,7 +74,7 @@ const DEFAULTS = {
   // open: "space" (a space on the checkout, as Herdr's own worktrees) or "tab".
   worktree: { base: "default", open: "tab" },
   // A sentence typed as the branch is named by the Config dialog's Writer page choice (shared
-  // "writer": agent and model, also the Git dialog's commit summaries). This
+  // "writer": agent and model). This
   // command is used only until a choice exists: the prompt goes in on stdin,
   // the branch name comes out on stdout.
   title: { command: "MAX_THINKING_TOKENS=0 claude -p --model claude-haiku-5-5 --tools='' --disable-slash-commands --setting-sources='' --system-prompt='' --no-session-persistence" },

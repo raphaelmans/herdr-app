@@ -89,8 +89,6 @@ Not choices, so leave them alone: `layout`, `health`, `config.page`, `agents.ord
 rm -rf ~/.config/herdr-app/data/jira     # that mod starts fresh the next time it opens
 ```
 
-Git's graph keeps its details file view per repository and machine under `herdr.git.graph:<machine-and-root>` in its own store. The default is a file tree. It also stores a divider ratio, default `0.5` and bounded to `0.2`–`0.8`; live divider dragging and restoration remain unverified (see `mods/git/PARITY.md`). These are view state, not shared Config choices.
-
 ## 6. Requirements
 
 `./health.sh` lists every program the mods need, where each was found, and the command for one that is missing. It exits 1 when a needed one is missing. The list is in `mods/config/requirements.json`; which mod needs what is in each mod's `mod.json` under `spec`.

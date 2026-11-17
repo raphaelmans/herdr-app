@@ -13,3 +13,5 @@ Every mod that reads from a program (git, gh, acli, wt, lific) follows one appro
 We rejected a shared cache module (a mod can't import another mod's files, and each source invalidates differently) and timers that redraw on a schedule (the Waiting rule forbids them, and they spend reads on views nobody is looking at).
 
 **Consequences:** stale-by-design is accepted: a kept list can be up to its age old until `r`. Conditional requests (gh's ETag / 304, free of rate limit) would replace ages for GitHub and are still to do. None of the gains were timed in the live window; they come from fewer spawns and less parsing by construction.
+
+**Note (ADR 0011):** the Git mod examples now live on the `lazygit-mod` branch; Pull requests and Jira still follow every rule here.

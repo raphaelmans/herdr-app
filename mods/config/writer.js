@@ -1,5 +1,5 @@
 // Writer page: which agent and model write the short texts other mods ask
-// for, the Git dialog's commit summary and the launcher's worktree branch names.
+// for, such as the launcher's worktree branch names and agent titles.
 //
 // The choice is kept in shared state under "writer":
 //   { agent, models: { <agent>: <model> }, custom, command, label }
@@ -42,10 +42,10 @@ const RECIPES = {
   },
 };
 const CUSTOM = "custom";
-const SAMPLE = "Reply with only a git commit subject line for this change: add a settings dialog that picks which agent writes commit summaries.";
+const SAMPLE = "Reply with only a git branch name, lowercase words joined by hyphens, for this work: add a settings page that picks which agent writes branch names.";
 // A kind of one-shot command chosen this way: where it is kept, its recipes,
 // and what its page says. The Writer is one; the Lific agent (./lific.js) another.
-const WRITER = { key: KEY, page: "writer", name: "Writer", does: "commit summaries and branch names", recipes: RECIPES, fallback: "claude",
+const WRITER = { key: KEY, page: "writer", name: "Writer", does: "worktree branch names and agent titles", recipes: RECIPES, fallback: "claude",
   sample: SAMPLE, trying: "Writing…", timeout: 90_000, follows: true, hints: "j k g G choose · t try it · saved as you change it" };
 
 // Herdr's installed agents, narrowed to the shortlist when it names one of them.

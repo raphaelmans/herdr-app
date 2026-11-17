@@ -13,7 +13,7 @@ const GOES = [
   ["Agents beside a shell", "taken out of the tab, still running; put back to the right of their neighbour"],
   ["Agents list, counts and status marks", "sidebar, tab bar and status bar"],
   ["Skillshare", "its tab-bar button and panel"],
-  ["Agent choices", "the + menu, the launcher, the Agents, Writer and Models pages, Write summary"],
+  ["Agent choices", "the + menu, the launcher, the Agents, Writer and Models pages"],
   ["Agent keys", "agent hub, fork, next and previous agent, Go to"],
   ["Notifications and sounds", "finished and needs-you toasts, the attention sounds"],
 ];

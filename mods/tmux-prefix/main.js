@@ -36,7 +36,7 @@ const BINDINGS = [
   ["D", "Close space", "space.close"],
   ["G", "New worktree", "worktree"],
   ["w", "Go to", "mod.open", { name: "go-to" }],
-  ["g", "Git", "mod.open", { name: "git" }],
+  ["g", "Lazygit", "mod.open", { name: "lazygit" }],
   ["b", "Toggle sidebar", "layout.toggle", { id: "sidebar" }],
   ["e", "Toggle Neovim", "nvim-pane.toggle"],
   ["i", "Send box", "mod.open", { name: "send-box" }],

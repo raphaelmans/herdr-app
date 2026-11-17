@@ -49,7 +49,7 @@ const SELF = "config";
 const PAGE = "config.page";
 const PAGES = [
   { key: "agents", name: "Agents", about: "the ones offered when you pick an agent", page: Agents },
-  { key: "writer", name: "Writer", about: "writes commit summaries, worktree branch names and agent titles", page: Writer },
+  { key: "writer", name: "Writer", about: "writes worktree branch names and agent titles", page: Writer },
   { key: "models", name: "Models", about: "the model catalog, synced from models.dev", page: Models },
   { key: "worktrunk", name: "Worktrunk", about: "its commit writer, where worktrees go, what a merge does", page: Worktrunk },
   { key: "lific", name: "Lific", about: "the agent that carries out Lific requests, and Lific's MCP", page: Lific },

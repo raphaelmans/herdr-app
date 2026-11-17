@@ -18,3 +18,5 @@ Whatever the pause:
 - **A long list of choices is a combo box**: a field that filters, a popup of capped rows read lazily and kept per source (ADR 0009), Vim motions inside it. It scales to many worktrees or sprints where an inline list would not. The Launcher's branch field and Jira's scope use it.
 
 **Consequences:** a new search picks its row from the table and names its constant; a pause above 250 ms needs the Enter shortcut, or it reads as lag. The main view's spinner in the Git mod appears only after 180 ms, so quick reads don't flash one.
+
+**Note (ADR 0011):** the Git mod's 180 ms main-view spinner now lives on the `lazygit-mod` branch.
