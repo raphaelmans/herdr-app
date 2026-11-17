@@ -1,16 +1,20 @@
 // Models page, and the model sync: the model catalog is the models each agent
-// can be started with, taken from models.dev and kept in
+// can be started with, taken from models.dev or the agent's own list, kept in
 //   ~/.config/herdr-app/models.json
 //   { synced: <ISO time>, source, agents: { <agent key>: [[model id, name, reasoning levels], ...] } }
 // newest first. A mod that offers models reads that file (the Launcher) or,
 // in this mod, catalog() (the Writer page). Shared "models.synced" is the time
 // of the last sync: it changes when the file does.
 //
-// Which models an agent takes is AGENTS below: its providers on models.dev.
-// Kept is the newest model of each family (models.dev's `family`: claude-opus,
+// The page lists Herdr's offered agents (knownAgents() narrowed by the agent
+// shortlist, ADR 0002), never a list of its own. Where an agent's models come
+// from is CATALOGS below, its recipe: its providers on models.dev, or the
+// command that makes the agent list them itself (the models of the signed-in
+// account; models.dev still gives their reasoning levels). From models.dev,
+// kept is the newest model of each family (models.dev's `family`: claude-opus,
 // gpt-mini) among those anyone can use (AVAILABLE below).
 // An older one can still be typed where a model is picked.
-// An agent that isn't listed has no catalog: its model is typed.
+// An agent without a recipe is still listed, with no catalog: its model is typed.
 //
 // A starred model is listed first wherever a model is picked. Shared
 // "models.starred": { <agent key>: [model id, ...] }, in the order starred. Any
@@ -21,27 +25,33 @@
 // tab-bar button's copy checks at start and every few hours, this page when it
 // opens), and from this page with s.
 
-import { div, svg } from "gpui-kit";
+import { div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, ScrollHandle } from "gpui-base";
-import { appHome, exec, readTextFile, setShared, shared } from "herdr";
-import { heading } from "./ui.js";
+import { appHome, exec, knownAgents, readTextFile, setShared, shared } from "herdr";
+import { heading, offeredAgents, waiting } from "./ui.js";
 
 const SOURCE = "https://models.dev/api.json";
 const STAMP = "models.synced";
 const DAY = 24 * 3600_000;
 const SHOWN = 150; // rows drawn at most: search narrows the rest
 const STARRED = "models.starred";
-// providers: models.dev provider ids, in the order listed (one it doesn't have
-// adds nothing). prefixed: the id is "provider/model". OpenCode takes any
-// provider; only these are listed, to keep its list short. families: of the
-// provider's models, only those whose family starts with one of these.
-// Copilot resells many makers' models; only Claude's and OpenAI's are listed.
-const AGENTS = {
-  claude: { name: "Claude Code", providers: ["anthropic"] },
-  codex: { name: "Codex", providers: ["openai"] },
-  gemini: { name: "Gemini", providers: ["google"] },
-  copilot: { name: "Copilot", providers: ["github-copilot"], families: ["claude", "gpt", "o1", "o3", "o4", "codex", "cursor"] },
-  opencode: { name: "OpenCode", providers: ["anthropic", "openai", "cursor"], prefixed: true },
+// Recipes, by Herdr's agent key. providers: models.dev provider ids, in the
+// order listed (one it doesn't have adds nothing). prefixed: the id is
+// "provider/model". OpenCode takes any provider; only these are listed, to keep
+// its list short. families: of the provider's models, only those whose family
+// starts with one of these. Copilot resells many makers' models; only Claude's
+// and OpenAI's are listed. list: a command printing the agent's own models, one
+// per line as "id", "* id (default)" or "id - Name" (run in a login shell, as
+// Herdr starts agents); its providers then only give reasoning levels. When it
+// prints nothing (not signed in, not installed), the last catalog is kept.
+const CATALOGS = {
+  claude: { providers: ["anthropic"] },
+  codex: { providers: ["openai"] },
+  gemini: { providers: ["google"] },
+  grok: { list: "grok models", providers: ["xai"] },
+  cursor: { list: "cursor-agent models" },
+  copilot: { providers: ["github-copilot"], families: ["claude", "gpt", "o1", "o3", "o4", "codex", "cursor"] },
+  opencode: { providers: ["anthropic", "openai"], prefixed: true },
 };
 
 // The catalog as last read or synced, and the sync in flight: one of each for
@@ -95,18 +105,40 @@ const AVAILABLE = `.tool_call and .status == null and (.modalities.output // ["t
   and ((.id + " " + (.name // "")) | test("preview|experimental|alpha|beta|internal|[-_ ]exp([-_ ]|$)"; "i") | not)
   and ((.description // "") | test("authorized|limited access|early access|trusted access|waitlist|research preview"; "i") | not)`;
 const list = (rule) => `[${JSON.stringify(rule.providers)}[] as $p | (.[$p].models // {}) | [.[] | select(${AVAILABLE}${rule.families ? ` and ((.family // .id) | test("^(${rule.families.join("|")})"))` : ""})] | group_by(.family // .id) | map(max_by(.release_date // "")) | sort_by(.release_date // "") | reverse | .[] | [${rule.prefixed ? '"\\($p)/\\(.id)"' : ".id"}, (.name // .id), ([.reasoning_options[]? | select(.type == "effort") | .values[]? | select(type == "string" and length > 0)] | unique)]]`;
-const FILTER = `{${Object.entries(AGENTS).map(([key, rule]) => `${JSON.stringify(key)}: ${list(rule)}`).join(", ")}} as $agents
+// An agent's own list: its printed lines read as models, in its order, each
+// with the reasoning levels models.dev gives the same id. "auto" is no model.
+// Regexes as jq string literals (JSON.stringify writes valid ones): colors and
+// zero-width spaces are dropped, then a line is "id", "* id (default)" or "id - Name".
+const ANSI = JSON.stringify(String.raw`\u001b\[[0-9;?]*[A-Za-z]`.replace("\\u001b", "\u001b"));
+const INVISIBLE = JSON.stringify("[​‌‍﻿]");
+const LINE = JSON.stringify(String.raw`^\s*(?:[*-]\s+)?(?<id>[A-Za-z0-9][A-Za-z0-9._:/\[\]-]*)(?:\s+\(default\))?(?:\s+-\s+(?<name>.*?))?\s*$`);
+const own = (key, rule) => `(($own[0][${JSON.stringify(key)}] // "") | gsub(${ANSI}; "") | gsub(${INVISIBLE}; "")
+  | [split("\n")[] | capture(${LINE})? | select(.id != "auto")]
+  | reduce .[] as $m ([]; if any(.[]; .[0] == $m.id) then . else . + [[$m.id, ($m.name // $m.id)]] end)
+  | map(. as [$id, $name] | [${JSON.stringify(rule.providers ?? [])}[] as $p | $api[$p].models[$id]? // empty] as $dev
+    | [$id, (if $name == $id then ($dev[0].name // $id) else $name end), ([$dev[] | .reasoning_options[]? | select(.type == "effort") | .values[]? | select(type == "string" and length > 0)] | unique)])
+  | if length == 0 then ($old[0].agents[${JSON.stringify(key)}] // []) else . end)`;
+const FILTER = `. as $api | {${Object.entries(CATALOGS).map(([key, rule]) => `${JSON.stringify(key)}: ${rule.list ? own(key, rule) : list(rule)}`).join(", ")}} as $agents
 | if ([$agents[] | length] | add) == 0 then error("models.dev listed no models") else
   { version: 2, synced: (now | todate), source: $source, agents: $agents } end`;
 // $1 models.json, $2 the source, $3 the jq filter. The file is replaced only by a whole new one.
+// $4: "<agent key><tab><command>" lines, the agents that list their own models:
+// each runs in a login shell, and what it prints goes to the filter as $own;
+// the catalog as it was, as $old.
 const PULL = `command -v jq >/dev/null || { echo "jq is not installed" >&2; exit 1; }
-t="$1.tmp.$$"; trap 'rm -f "$t"' EXIT
-curl -fsSL --compressed --max-time 120 "$2" | jq -r --arg source "$2" "$3" > "$t" || exit 1
+t="$1.tmp.$$"; d="$1.own.$$"; trap 'rm -rf "$t" "$d"' EXIT; mkdir -p "$d"
+printf '%s\\n' "$4" | while IFS='	' read -r key cmd; do
+  [ -n "$key" ] && "\${SHELL:-/bin/sh}" -lic "$cmd" </dev/null 2>/dev/null | jq -Rs --arg k "$key" '{($k): .}' > "$d/$key.json"
+done
+cat "$d"/*.json 2>/dev/null | jq -s 'add // {}' > "$d/all" || echo '{}' > "$d/all"
+{ [ -s "$1" ] && cat "$1"; } > "$d/old" || echo '{}' > "$d/old"
+curl -fsSL --compressed --max-time 120 "$2" | jq -r --arg source "$2" --slurpfile own "$d/all" --slurpfile old "$d/old" "$3" > "$t" || exit 1
 [ -s "$t" ] || { echo "models.dev sent nothing" >&2; exit 1; }
 mv "$t" "$1"`;
+const LISTS = Object.entries(CATALOGS).filter(([, rule]) => rule.list).map(([key, rule]) => `${key}\t${rule.list}`).join("\n");
 
 async function pull() {
-  const r = await exec("sh", ["-c", PULL, "sh", path(), SOURCE, FILTER], { timeout: 150_000 });
+  const r = await exec("sh", ["-c", PULL, "sh", path(), SOURCE, FILTER, LISTS], { timeout: 240_000 });
   if (r.code !== 0) throw new Error(r.stderr.trim().split("\n").pop() || `exit ${r.code}`);
   cache = null;
   await load();
@@ -128,6 +160,9 @@ export async function refresh() {
   try { await sync(); } catch (e) { console.log(`config: model sync: ${e?.message ?? e}`); }
 }
 
+// An agent's logo (Herdr's icon and tint) as the Agents page draws it: a one-color glyph takes the text color.
+const logo = (t, l, on) => !l?.icon ? div().flex_none().w(16) : l.tint ? svg(l.icon).size(16).flex_none().text_color(on ? t.foreground : t.dim) : image(l.icon).w(16).h(16).flex_none();
+
 const HINTS = "j k g G agent · ↵ its models · / search them · s sync now";
 
 export default class Models {
@@ -141,12 +176,18 @@ export default class Models {
     this.error = "";
     this.hints = HINTS;
     this.scroll = ScrollHandle.new();
+    this.agents = null; // Herdr's offered agents, in its order: null until it answers
   }
 
   // While stepped into the models or their search, every key is this page's.
   get typing() { return this.inside || this.searching; }
 
   start(cx) {
+    // The agents listed, read once for the dialog: Herdr's, narrowed by the shortlist.
+    cx.spawn(async (cx) => {
+      try { this.agents = offeredAgents(await knownAgents()); } catch { this.agents = []; this.error = "Could not check installed agents."; }
+      cx.notify();
+    });
     cx.spawn(async (cx) => {
       await load();
       cx.notify();
@@ -164,7 +205,7 @@ export default class Models {
     cx.notify();
   }
 
-  agent() { return Object.keys(AGENTS)[this.at]; }
+  agent() { return this.agents?.[this.at]?.key; }
 
   // The agent's models as listed: the starred first, narrowed by the search.
   rows() {
@@ -205,7 +246,7 @@ export default class Models {
   }
 
   key(e, cx) {
-    const keys = Object.keys(AGENTS), ch = e.key_char ?? e.key, m = e.modifiers ?? {};
+    const keys = (this.agents ?? []).map((a) => a.key), ch = e.key_char ?? e.key, m = e.modifiers ?? {};
     if (e.key === "escape") { if (!this.typing && this.search === null) return false; return this.back(cx), true; }
     if (m.control || m.platform || m.alt) return this.typing;
     if (this.searching) {
@@ -226,9 +267,10 @@ export default class Models {
       else if (ch === "/") { this.search = this.search ?? ""; this.searching = true; cx.notify(); }
       return true;
     }
+    if (step && !keys.length) return true;
     if (step) this.at = (this.at + step + keys.length) % keys.length;
     else if (ch === "g" || ch === "G") this.at = ch === "g" ? 0 : keys.length - 1;
-    else if (e.key === "enter") return this.enter(cx), true;
+    else if (e.key === "enter") return keys.length && this.enter(cx), true;
     else if (ch === "/") { this.search = ""; this.searching = true; this.enter(cx); }
     else if (ch === "s") return this.sync(cx), true;
     else return false;
@@ -238,21 +280,24 @@ export default class Models {
   }
 
   render(t) {
-    const keys = Object.keys(AGENTS), key = this.agent(), all = offered(key), rows = this.rows(), stars = starred(key);
+    const agents = this.agents ?? [], now = agents[this.at], key = now?.key, all = key ? offered(key) : [], rows = key ? this.rows() : [], stars = key ? starred(key) : [];
+    const recipe = CATALOGS[key], source = !recipe ? "no catalog: its model is typed where it is started" : recipe.list ? "as it lists them for the signed-in account" : "the newest of each family";
     const at = Math.min(this.row, Math.max(0, rows.length - 1));
     const when = synced();
     return v_flex().size_full().min_h(0).gap(10)
       .child(heading(t, "CATALOG", when ? `from models.dev · synced ${ago(when)}` : this.syncing ? "syncing from models.dev…" : "not synced yet"))
-      .child(v_flex().flex_none().gap(2).children(keys.map((k, i) => {
-        const on = i === this.at, list = catalog(k), n = starred(k).length;
+      .when(!this.agents, (el) => el.child(div().px(10).py(6).text_color(t.dim).child(waiting(t, "Checking what is installed"))))
+      .child(v_flex().flex_none().gap(2).children(agents.map((a, i) => {
+        const k = a.key, on = i === this.at, list = catalog(k), n = starred(k).length;
         return h_flex().id(`models-${k}`).flex_none().h(30).px(10).gap(10).items_center().rounded(8).cursor_pointer()
           .when(on, (el) => el.bg(t.selected)).when(!on, (el) => el.hover((s) => s.bg(t.hover)))
           .on_click((_e, cx) => { this.at = i; this.inside = false; this.searching = false; this.search = null; this.row = 0; this.hints = HINTS; this.host.handle.focus(); cx.notify(); })
-          .child(div().flex_none().w(110).truncate().text_color(on ? t.foreground : t.muted).child(AGENTS[k].name))
+          .child(logo(t, a, on))
+          .child(div().flex_none().w(110).truncate().text_color(on ? t.foreground : t.muted).child(a.name))
           .child(div().flex_1().min_w(0).truncate().text_size(11).text_color(t.dim).child(list.length ? `newest: ${list[0][0]}` : ""))
-          .child(div().flex_none().text_size(11).text_color(t.dim).child([n ? `${n} starred` : "", list.length ? `${list.length} models` : "none"].filter(Boolean).join(" · ")));
+          .child(div().flex_none().text_size(11).text_color(t.dim).child([n ? `${n} starred` : "", list.length ? `${list.length} models` : CATALOGS[k] ? "none" : "no catalog"].filter(Boolean).join(" · ")));
       })))
-      .child(heading(t, "MODELS", this.search !== null ? `/${this.search}${this.searching ? "▏" : ""} · ${rows.length} of ${all.length}` : `${AGENTS[key].name} can be started with these · the newest of each family · starred first`))
+      .child(heading(t, "MODELS", this.search !== null ? `/${this.search}${this.searching ? "▏" : ""} · ${rows.length} of ${all.length}` : now ? `${now.name} can be started with these · ${source} · starred first` : ""))
       .child(v_flex().id("models-list").flex_1().min_h(0).overflow_y_scroll().track_scroll(this.scroll).children(rows.map(([id, name], i) => {
         const on = this.inside && i === at, has = stars.includes(id);
         return h_flex().id(`model-${id}`).flex_none().h(26).px(10).gap(10).items_center().rounded(6).cursor_pointer()
@@ -263,7 +308,7 @@ export default class Models {
           .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(t.foreground).child(id))
           .child(div().flex_none().max_w(260).truncate().text_size(11).text_color(t.dim).child(name || (has ? "not in the catalog" : "")));
       }))
-        .when(!rows.length, (el) => el.child(div().px(10).py(6).text_color(t.dim).child(all.length ? "Nothing matches." : when ? "models.dev lists none for this agent." : "Nothing yet: s syncs the catalog."))))
+        .when(!rows.length, (el) => el.child(div().px(10).py(6).text_color(t.dim).child(all.length ? "Nothing matches." : !this.agents ? "" : !recipe ? "No catalog for this agent: type its model where it is started." : recipe.list ? "It listed none: sign in to it, then s syncs." : when ? "models.dev lists none for this agent." : "Nothing yet: s syncs the catalog."))))
       .when(Boolean(this.error), (el) => el.child(div().flex_none().px(4).text_size(12).text_color(t.blocked).child(this.error)))
       .child(h_flex().flex_none().px(4).justify_end()
         .child(h_flex().id("models-sync").flex_none().h(30).px(14).gap(7).items_center().rounded(8).bg(t.solid).text_color(t.solid_foreground).text_size(12)

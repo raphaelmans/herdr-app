@@ -17,7 +17,7 @@
 import { div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
 import { exec, home, knownAgents, notify, setShared, shared, settings } from "herdr";
-import { heading, SHORTLIST, waiting } from "./ui.js";
+import { heading, offeredAgents as offered, waiting } from "./ui.js";
 import { follow } from "./worktrunk.js";
 import { ago, catalog, load, offered as models, starred, synced } from "./models.js";
 
@@ -48,13 +48,6 @@ const SAMPLE = "Reply with only a git branch name, lowercase words joined by hyp
 const WRITER = { key: KEY, page: "writer", name: "Writer", does: "worktree branch names and agent titles", recipes: RECIPES, fallback: "claude",
   sample: SAMPLE, trying: "Writing…", timeout: 90_000, follows: true, hints: "j k g G choose · t try it · saved as you change it" };
 
-// Herdr's installed agents, narrowed to the shortlist when it names one of them.
-function offered(agents) {
-  const installed = agents.filter((a) => a.installed), keys = shared(SHORTLIST);
-  if (!Array.isArray(keys) || !keys.length) return installed;
-  const kept = installed.filter((a) => keys.includes(a.key));
-  return kept.length ? kept : installed;
-}
 const read = (kind) => {
   const saved = shared(kind.key) ?? {};
   return { agent: saved.agent ?? kind.fallback, models: { ...saved.models }, custom: saved.custom ?? "" };

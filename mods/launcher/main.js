@@ -81,7 +81,7 @@ const DEFAULTS = {
 };
 // How each agent is told its model: the flag that goes before the model's id.
 // An agent with none here, and none in launcher.json, is started without one.
-const MODEL_FLAG = { claude: "--model", codex: "-m", opencode: "-m", cursor: "--model", gemini: "-m", copilot: "--model", pi: "--model" };
+const MODEL_FLAG = { claude: "--model", codex: "-m", opencode: "-m", cursor: "--model", gemini: "-m", grok: "-m", copilot: "--model", pi: "--model" };
 // The agent's own choice: the model each agent starts with when told none, as
 // its own settings on that machine say. Prints "<agent key><tab><model>" lines;
 // an agent whose settings name none prints nothing after the tab. A folder's
@@ -93,7 +93,7 @@ printf 'opencode\\t%s\\n' "$(j '.model' ~/.config/opencode/opencode.json)"
 printf 'gemini\\t%s\\n' "$(j '.model.name // (.model | strings)' ~/.gemini/settings.json)"
 printf 'cursor\\t%s\\n' "$(j '.model.displayName // .model.modelId' ~/.cursor/cli-config.json)"`;
 // CLI syntax is separate from model capabilities: the catalog supplies levels.
-const REASONING_FLAG = { claude: ["--effort"], codex: ["-c", "model_reasoning_effort={value}"] };
+const REASONING_FLAG = { claude: ["--effort"], codex: ["-c", "model_reasoning_effort={value}"], grok: ["--reasoning-effort"] };
 const LEVEL_ORDER = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
 const STARRED = "models.starred"; // { <agent key>: [model id, ...] }: listed first, in the order starred
 const MODELS_SHOWN = 120; // rows drawn at most: search narrows the rest

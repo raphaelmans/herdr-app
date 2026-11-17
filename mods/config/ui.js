@@ -1,7 +1,7 @@
 // What the pages draw alike.
 import { div, svg } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { home } from "herdr";
+import { home, shared } from "herdr";
 
 // A wait: one spinner, turned natively, and what is being waited for.
 export const waiting = (t, label) => h_flex().gap(6).items_center().child(svg("mods/workspace-chrome/spinner.svg").size(11).flex_none().text_color(t.working).spin(900)).child(label);
@@ -22,6 +22,13 @@ export const toggle = (t, on) => h_flex().flex_none().w(32).h(18).px(2).rounded_
 
 // The agent shortlist: the agent keys this machine offers; absent or empty, all.
 export const SHORTLIST = "agents.shortlist";
+// Herdr's installed agents, narrowed to the shortlist when it names one of them (ADR 0002).
+export function offeredAgents(agents) {
+  const installed = agents.filter((a) => a.installed), keys = shared(SHORTLIST);
+  if (!Array.isArray(keys) || !keys.length) return installed;
+  const kept = installed.filter((a) => keys.includes(a.key));
+  return kept.length ? kept : installed;
+}
 
 // A path with the home folder written as ~.
 export const tildify = (p) => (p.startsWith(home()) ? `~${p.slice(home().length)}` : p);

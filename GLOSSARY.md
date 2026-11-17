@@ -198,7 +198,7 @@ What one flow knows about one agent, such as how to ask it for a single answer o
 _Avoid_: preset, support, integration
 
 **Model catalog**:
-The models each agent can be started with, the newest of each family that anyone can use, taken from models.dev and kept in `models.json`. Wherever a model is picked, the choices are the catalog's; a model it does not have can still be typed.
+The models each offered agent can be started with, kept in `models.json`: for most agents the newest of each family that anyone can use, taken from models.dev; for an agent that lists its own models (Cursor, Grok), the ones it lists for the signed-in account. An agent with no recipe for it has no catalog. Wherever a model is picked, the choices are the catalog's; a model it does not have can still be typed.
 _Avoid_: model list (that is the Launcher's list of them), registry, models.dev (for our copy)
 
 **Starred model**:
@@ -206,7 +206,7 @@ A model marked to be listed first wherever a model is picked for its agent. Any 
 _Avoid_: favourite (too close to the agent shortlist), pinned (Herdr's word for an agent kept at the top), default
 
 **Model sync**:
-Bringing the model catalog up to date from models.dev. It runs by itself once a day, and from the Models page of Config.
+Bringing the model catalog up to date from models.dev and the agents that list their own models. It runs by itself once a day, and from the Models page of Config.
 _Avoid_: refresh, update, fetch
 
 ### Listing agents
