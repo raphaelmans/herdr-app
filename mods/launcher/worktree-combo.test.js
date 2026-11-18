@@ -25,7 +25,7 @@ async function harness(place) {
     spaces: () => [{ id: "space", machine: "remote", tabs: [] }], panes: () => [],
     appHome: () => "/config", home: () => "/home/test", props: () => ({ overlay: "launcher", place }),
     shared: key => (key === "worktrunk.enabled" ? true : null),
-    exec: (command, args, options) => new Promise(resolve => requests.push({ command, args, options, resolve })),
+    exec: (command, args, options) => new Promise((resolve, reject) => requests.push({ command, args, options, resolve, reject })),
     closeOverlay: id => commands.push(["close", id]), run: (...args) => commands.push(args),
     knownAgents() {}, notify() {}, openOverlay() {}, pickFolder() {}, readTextFile() {}, setShared() {}, theme() {}, writeTextFile() {},
   };
@@ -159,4 +159,40 @@ test("a split takes a worktree too: a plain terminal is started in the one chose
   assert.equal(split[1].direction, "right");
   assert.deepEqual(plain(split[1].argv.slice(0, 2).concat(split[1].argv.slice(3))), ["sh", "-c", "sh", "/wt/feat"]);
   assert.ok(h.commands.some(c => c[0] === "close"));
+});
+
+test("from a worktree, the main checkout is offered right under a new branch and opens a tab there", async () => {
+  const h = await harness();
+  const app = await h.open();
+  // wt lists the worktree you are in first.
+  await h.answer({ code: 0, stdout: JSON.stringify([["feat", "/wt/feat", false, true], ["main", "/repo", true, false], ["other", null, false, false]]), stderr: "" });
+  assert.deepEqual(plain(app.opts.map(w => w.branch).slice(1)), ["main", "feat", "other"]);
+  app.move("down", h.cx);
+  assert.equal(app.opts[app.at].branch, "main");
+  app.start(h.cx); await h.tick(); await h.tick();
+  const made = h.requests.find(r => r.command === "wt" && r.args[0] === "switch");
+  assert.deepEqual(plain(made.args), ["switch", "--no-cd", "--format", "json", "main"]);
+  made.resolve({ code: 0, stdout: JSON.stringify({ action: "existing", path: "/repo", branch: "main" }), stderr: "" });
+  await h.tick(); await h.tick();
+  const tab = h.commands.find(c => c[0] === "tab.new");
+  assert.equal(tab[1].folder, "/repo");
+});
+
+test("a folder that is gone says so, and a full path typed over it is read without it", async () => {
+  const h = await harness();
+  const app = await h.open();
+  const spawnFailed = new Error("`herdr.exec`: cannot run sh: No such file or directory (os error 2)");
+  for (const r of h.requests) r.reject(spawnFailed);
+  await h.tick(); await h.tick();
+  assert.equal(app.list, null);
+  assert.equal(app.listError, "No folder at /repo. Set the folder above (⌃F).");
+  const from = h.requests.length;
+  app.folder.set_value("/elsewhere");
+  const settling = app.settle(h.cx);
+  await h.tick();
+  const resolve = h.requests.slice(from).find(r => r.command === "sh");
+  assert.equal(resolve.options.cwd, undefined); // not the folder that is gone
+  resolve.resolve({ code: 0, stdout: "/elsewhere\n", stderr: "" });
+  assert.equal(await settling, "/elsewhere");
+  assert.equal(app.cwd, "/elsewhere");
 });

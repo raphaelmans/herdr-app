@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import vm from "node:vm";
 
-async function harness() {
+async function harness(extra = {}) {
   const context = vm.createContext({ console });
   const jobs = [], requests = [], commands = [], bindings = [];
   let checking = true, app, active;
@@ -23,7 +23,7 @@ async function harness() {
   const host = {
     checking: () => checking, focused: () => ({ cwd: "/repo", space: "space" }),
     spaces: () => [{ id: "space", machine: "remote" }], panes: () => [],
-    appHome: () => "/config", home: () => "/home/test", shared: () => null, props: () => ({ overlay: "launcher" }),
+    appHome: () => "/config", home: () => "/home/test", shared: () => null, props: () => ({ overlay: "launcher", ...extra }),
     exec: (command, args, options) => new Promise(resolve => requests.push({ command, args, options, resolve })),
     closeOverlay: id => commands.push(["close", id]), run: (...args) => commands.push(args),
     knownAgents() {}, notify() {}, openOverlay() {}, pickFolder() {}, readTextFile() {}, setShared() {}, theme() {}, writeTextFile() {},
@@ -86,4 +86,24 @@ test("arrows and Tab complete a path without cycling the program or launching it
   h.key("escape"); assert.equal(h.commands[0][0], "close");
   assert.ok(h.bindings.some(binding => binding.keystroke === "tab" && binding.context === "LauncherFolder"));
   await h.reply(h.requests[0], "repo\0"); await h.flush();
+});
+
+test("a split starts in its edited folder, and in the tab's folder when untouched", async () => {
+  const h = await harness({ place: "right" });
+  h.app.folder.set_value("~/other");
+  h.app.start({ ...{ notify() {}, stop_propagation() {}, sleep: async () => {} }, spawn: fn => fn({ notify() {} }) });
+  await h.tick();
+  const resolve = h.requests.find(r => r.args?.[3] === "~/other");
+  assert.ok(resolve, "the folder typed is resolved first");
+  await h.reply(resolve, "/home/test/other\n");
+  const split = h.commands.find(c => c[0] === "pane.split");
+  assert.equal(split[1].direction, "right");
+  assert.equal(split[1].argv.slice(0, 2).join(" "), "sh -c");
+  assert.equal(split[1].argv[4], "/home/test/other");
+
+  const plain = await harness({ place: "down" });
+  plain.app.start({ notify() {}, stop_propagation() {}, spawn() { throw new Error("nothing to look up"); } });
+  const direct = plain.commands.find(c => c[0] === "pane.split");
+  assert.equal(direct[1].direction, "down");
+  assert.equal(direct[1].argv, undefined);
 });

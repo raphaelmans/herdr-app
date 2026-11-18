@@ -18,6 +18,7 @@ const SAID = [
   /Model changed to\s+(\S+(?:\s+(?:minimal|low|medium|high|xhigh))?)/, // Codex /model
   /^\s*Main model:\s+(\S+)/, // Aider
   /([\w./-]*gemini-[\w.-]+)\s*\(\d+% context/, // Gemini CLI footer
+  /[─│]\s*(Grok\s+\d+(?:\.\d+)*(?:\s+[A-Z][\w-]*)*)(?:\s+\((\w+)\))?\s+·/, // Grok prompt box
 ];
 
 // A bare model id, trusted only in the last few lines of the screen.

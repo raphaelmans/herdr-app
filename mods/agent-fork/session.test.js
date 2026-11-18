@@ -10,6 +10,10 @@ const catalog = [
   { key: "claude", name: "Claude Code", run: ["claude"], installed: true },
   { key: "pi", name: "Pi", run: ["pi"], installed: true },
 ];
+const more = [...catalog,
+  { key: "grok", name: "Grok", run: ["grok"], installed: true },
+  { key: "opencode", name: "OpenCode", run: ["opencode"], installed: true },
+];
 const id = "12345678-1234-1234-1234-123456789abc";
 const ok = (value) => ({ code: 0, stdout: typeof value === "string" ? value : JSON.stringify(value), stderr: "" });
 const clone = (value) => JSON.parse(JSON.stringify(value));
@@ -38,6 +42,7 @@ async function harness({ key = "codex", on = null, status = "idle", exec: overri
       if (command === "lsof") return ok("/sessions/rollout-2026-11-16-" + id + ".jsonl");
       if (command === "sh") return ok("/home/remote");
       if (command === "claude") return ok("backgrounded · copy123");
+      if (command === "opencode") return ok([{ id: "ses_other", directory: "/elsewhere" }, { id: "ses_here", directory: "/work" }]);
       throw new Error("Unexpected command " + command);
     },
     checking: () => true, focused: () => ({ pane: "other-pane", space: "other-space" }),
@@ -192,6 +197,7 @@ async function launcher(h, fork = { pane: "p1", terminal: "t1", key: "codex", na
   return Object.assign(new Launcher(), {
     fork, agents: catalog, picked: fork?.key, search: null, cfg: { program: "terminal", programs: {} },
     on: null, files: [], message: { value: () => "Next direction" }, catalog: {}, own: {}, pane: "p1",
+    offered: "/work", folder: { value: () => "/work" },
   });
 }
 const cx = { notify() {} };
@@ -225,4 +231,33 @@ test("unsupported fork stays in picker; cancelling and ordinary launcher keep th
   assert.equal(regular.programs()[0].terminal, true);
   regular.start(cx);
   assert.equal(h.calls.find((c) => c.run).run, "pane.split");
+});
+
+test("Grok resumes its own open session as a fork, found by the pane's pid", async () => {
+  const h = await harness({ key: "grok", entries: more });
+  h.state.files["/home/me/.grok/active_sessions.json"] = JSON.stringify([{ session_id: "other", pid: 7 }, { session_id: "grok-session", pid: 100 }]);
+  const result = await h.session.start(await h.source(), h.target("grok", { argv: ["grok", "-m", "grok-4.7"], task: "Try the other way" }));
+  assert.deepEqual(JSON.parse(h.calls.find((c) => c.command === "env").args[4]).argv, ["grok", "-m", "grok-4.7", "--resume", "grok-session", "--fork-session", "Try the other way"]);
+  assert.equal(result.guessed, false);
+});
+
+test("Grok without a session record forks the latest one and says so", async () => {
+  const h = await harness({ key: "grok", entries: more });
+  const result = await h.session.start(await h.source(), h.target("grok"));
+  assert.deepEqual(JSON.parse(h.calls.find((c) => c.command === "env").args[4]).argv, ["grok", "--continue", "--fork-session"]);
+  assert.equal(result.guessed, true);
+});
+
+test("OpenCode forks its latest session in the pane's folder, the task as --prompt", async () => {
+  const h = await harness({ key: "opencode", entries: more });
+  const result = await h.session.start(await h.source(), h.target("opencode", { task: "Look again" }));
+  assert.deepEqual(JSON.parse(h.calls.find((c) => c.command === "env").args[4]).argv, ["opencode", "--session", "ses_here", "--fork", "--prompt", "Look again"]);
+  assert.equal(result.guessed, true);
+});
+
+test("the Launcher marks Grok and OpenCode as able to fork", async () => {
+  const { session } = await harness();
+  assert.equal(session.supportsFork("grok"), true);
+  assert.equal(session.supportsFork("opencode"), true);
+  assert.equal(session.supportsFork("cursor"), false);
 });

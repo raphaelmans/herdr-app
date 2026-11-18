@@ -195,6 +195,28 @@ function clean(text) {
 // are here, then the PATH Herdr runs programs with. The order health.sh uses.
 const SHIMS = 'd="${MISE_DATA_DIR:-$HOME/.local/share/mise}/shims"; [ -d "$d" ] && PATH="$d:$PATH"; export PATH; ';
 
+// acli says only "failed to list projects" (and the like) when it isn't signed
+// in, so a failed read asks it once whether it is, and says so plainly.
+export const SIGNED_OUT = "Jira isn't signed in on this computer.";
+// The sign-in, run in a terminal the board shows: it asks for the site, then
+// finishes in the browser (OAuth), so no token is ever typed or kept here.
+export const SIGN_IN = `${SHIMS}exec acli jira auth login --web`;
+
+// `acli jira auth status`, one run at a time however many reads fail together
+// (the board's first load reads me() and projects() at once). Null if it didn't run.
+let probing = null;
+function authStatus() {
+  assertRead(["jira", "auth", "status"]);
+  return (probing ??= exec("sh", ["-c", `${SHIMS}exec acli jira auth status`], { timeout: 10_000 })
+    .catch(() => null).finally(() => { probing = null; }));
+}
+
+async function failure(r) {
+  const own = clean(r.stderr || r.stdout);
+  const st = await authStatus();
+  return new Error(st && !/Authenticated/.test(st.stdout) ? SIGNED_OUT : own);
+}
+
 // acli's answer is held by the shell and only handed to jq when acli ended
 // well, so its own exit status and message are what a failure reports. Every
 // sh has this; `set -o pipefail` is not in all of them.
@@ -203,16 +225,9 @@ async function acli(args, filter, { slurp = false, timeout = 90_000 } = {}) {
   const jq = slurp ? "jq -sc" : "jq -c";
   const script = `${SHIMS}filter=$1; shift; out=$(acli "$@") || exit $?; printf '%s' "$out" | ${jq} "$filter"`;
   const r = await exec("sh", ["-c", script, "acli", filter, ...args], { timeout });
-  if (r.code !== 0) throw new Error(clean(r.stderr || r.stdout));
+  if (r.code !== 0) throw await failure(r);
   const out = r.stdout.trim();
   return out ? JSON.parse(out) : null;
-}
-
-async function acliText(args, timeout = 20_000) {
-  assertRead(args);
-  const r = await exec("sh", ["-c", `${SHIMS}exec acli "$@"`, "acli", ...args], { timeout });
-  if (r.code !== 0) throw new Error(clean(r.stderr || r.stdout));
-  return r.stdout;
 }
 
 function person(raw) {
@@ -324,8 +339,9 @@ function projectKey(key) {
 
 export async function me({ force = false } = {}) {
   const value = await once("me", TTL.me, force, async () => {
-    const text = await acliText(["jira", "auth", "status"]);
-    if (!/Authenticated/.test(text)) throw new Error("Jira is not signed in.");
+    const st = await authStatus();
+    const text = st?.code === 0 ? st.stdout : "";
+    if (!/Authenticated/.test(text)) throw new Error(SIGNED_OUT);
     const site = text.match(/Site:\s*(\S+)/)?.[1];
     const email = text.match(/Email:\s*(\S+)/)?.[1] ?? "";
     const siteHost = site ? `https://${site}` : null;

@@ -30,7 +30,7 @@
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, ScrollHandle, VirtualListScrollHandle, v_virtual_list, Scrollbar, InputState, Input, TextView, Popup } from "gpui-base";
-import { checking, closeOverlay, exec, focused, nextCommand, notify, panes, props, run, setShared, spaces, theme } from "herdr";
+import { checking, closeOverlay, exec, focused, hc, nextCommand, notify, openOverlay, panes, props, run, setShared, spaces, theme } from "herdr";
 import * as acli from "./acli.js";
 
 const SOURCES = { acli };
@@ -191,7 +191,7 @@ export default class Jira extends View {
 
   async pull(force, cx) {
     const counts = this.count(force);
-    const [me, projects] = await Promise.all([this.source.me(), this.source.projects()]);
+    const [me, projects] = await Promise.all([this.source.me({ force }), this.source.projects({ force })]);
     this.me = me;
     this.projects = Array.isArray(projects) ? projects : [];
     // The first choice of project may fall to "where you have open work":
@@ -226,6 +226,46 @@ export default class Jira extends View {
     // Made here, not while drawing: a scroll handle cannot be created during render.
     for (const col of [...columns, { id: "backlog" }]) this.colScroll[col.id] ??= ScrollHandle.new();
     this.issues[`${project}|${scope}`] = Array.isArray(list) ? list : [];
+  }
+
+  // Signed out: Enter (or the button) runs acli's sign-in in a terminal shown
+  // over the board. When that terminal ends, the board reads again by itself.
+  signedOut() { return this.error === this.source.SIGNED_OUT; }
+  signIn(cx) {
+    if (this.signingIn || !this.source.SIGN_IN) return;
+    this.signingIn = true;
+    cx.notify();
+    cx.spawn(async (cx) => {
+      try {
+        const r = await hc(["run", "--json", "--bg", "--rm", "--no-parent", "--", "sh", "-c", this.source.SIGN_IN]);
+        if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim() || "herdr-core could not start the sign-in");
+        const address = JSON.parse(r.stdout).address;
+        if (!address) throw new Error("herdr-core returned no sign-in terminal.");
+        openOverlay({ kind: "dialog", modal: true, width: 640, height: 360, layout: { type: "block", content: { terminal: address } } });
+        // Browser authentication can outlast several check-ins. Keep the wait
+        // below the host command timeout and refresh only after the CLI exits.
+        for (;;) {
+          const result = await hc(["wait", address, "--json", "--timeout", "20"]);
+          if (result.code !== 0) {
+            // --rm can remove our terminal between its exit and the next wait.
+            if (result.code === 3 && JSON.parse(result.stderr || "{}").error?.kind === "not_found") break;
+            throw new Error((result.stderr || result.stdout).trim() || "Lost the sign-in terminal.");
+          }
+          const wait = JSON.parse(result.stdout);
+          if (wait.reason === "exit" && wait.ended) break;
+          if (wait.reason !== "timeout" && wait.reason !== "message") throw new Error("Could not confirm the sign-in terminal exited.");
+        }
+      } catch (e) {
+        notify({ title: "Couldn't complete the Jira sign-in", body: String(e?.message ?? e), level: "error" });
+        return;
+      } finally {
+        this.signingIn = false;
+        cx.notify();
+      }
+      this.error = null; this.loaded = false;
+      cx.notify();
+      try { await this.pull(true, cx); } catch (e) { this.fail(e, cx); }
+    });
   }
 
   reload(cx, force = false) {
@@ -663,7 +703,7 @@ export default class Jira extends View {
       h: () => this.across(-1, cx), left: () => this.across(-1, cx),
       g: () => this.edge(false, cx), p: () => this.switchProject(1, cx),
       a: () => this.toggleWho(cx), s: () => this.openScope(cx), z: () => this.toggleDetail(cx),
-      enter: () => this.hand(), i: () => this.hand(), b: () => this.openBranch(cx),
+      enter: () => (this.signedOut() ? this.signIn(cx) : this.hand()), i: () => this.hand(), b: () => this.openBranch(cx),
       y: () => this.copy(cx), o: () => this.web(), r: () => this.reload(cx, true),
       q: () => this.close(), escape: () => this.close(),
     };
@@ -842,6 +882,11 @@ export default class Jira extends View {
                 .children(cards.map(card))));
     };
 
+    const signIn = v_flex().p(20).gap(10).max_w(460)
+      .child(div().text_size(14).font_semibold().text_color(t.foreground).child(this.source.SIGNED_OUT.replace(/\.$/, "")))
+      .child(div().text_size(12.5).text_color(t.muted).child("Sign in with your Atlassian account: a terminal opens here, you pick your site, and it finishes in the browser. No token is typed or kept."))
+      .child(h_flex().gap(10).items_center()
+        .child(this.signingIn ? waiting(t, "Waiting for the sign-in to finish") : button("jr-sign-in", "Sign in", "↵", true, (cx) => this.signIn(cx))));
     const empty = this.error ? this.error
       : !this.loaded || this.reading ? waiting(t, this.projects.length ? "Reading issues" : "Reading projects")
       : !this.projects.length ? "No Jira projects."
@@ -851,7 +896,7 @@ export default class Jira extends View {
 
     const board = v_flex().flex_1().min_w(0).h_full()
       .child(bar)
-      .child(shown
+      .child(this.signedOut() ? signIn : shown
         ? h_flex().flex_1().min_h(0).min_w(0).w_full().p(8).gap(8).overflow_hidden().children(cols.map(column))
         : div().p(20).text_size(12.5).text_color(this.error ? t.blocked : t.muted).child(empty));
 

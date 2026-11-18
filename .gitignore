@@ -14,8 +14,11 @@
 docs/*
 !docs/adr/
 !docs/adr/*.md
+!docs/specs/
+!docs/specs/*.md
 # Herdr's reference files as of the last maintenance run (ADR 0007)
 !MAINTENANCE.md
+!RECIPE_MAINTENANCE.md
 !docs/baseline/
 !docs/baseline/*
 
@@ -52,6 +55,7 @@ mods/*
 !mods/status-bar/
 !mods/tab-bar/
 !mods/tab-sequence/
+!mods/pane-reference/
 !mods/pane-move/
 !mods/toasts/
 !mods/skillshare/
@@ -67,6 +71,8 @@ mods/*
 !mods/*/*-LICENSE
 !mods/auto-title/install.*
 !mods/viz/CONTEXT.md
+!mods/lific/session/
+!mods/lific/session/**
 !mods/file-picker/README.md
 !mods/viz/herdr-viz
 !mods/stayawake/stayawake.sh

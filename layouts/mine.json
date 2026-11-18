@@ -267,13 +267,21 @@
       },
       "edge": "bottom",
       "align": "center"
+    },
+    {
+      "id": "pane-reference",
+      "content": {
+        "mod": "pane-reference"
+      },
+      "edge": "bottom",
+      "align": "center"
     }
   ],
   "titlebar": "none",
-  "toast": "toasts",
   "traffic_lights": [
     12,
     16
   ],
-  "preview": "layouts/mine.png"
+  "preview": "layouts/mine.png",
+  "toast": "toasts"
 }

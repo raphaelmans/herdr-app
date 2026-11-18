@@ -69,10 +69,25 @@ async function programs() {
   return { rows, writer: { program: writer, path: where } };
 }
 
+// acli as a login shell finds it: mise's shims first (the Jira board's own order).
+const SHIMS = 'd="${MISE_DATA_DIR:-$HOME/.local/share/mise}/shims"; [ -d "$d" ] && PATH="$d:$PATH"; export PATH; ';
+
+// The Jira board (mods/jira) reads through acli, which also has to be signed in:
+// a found acli says nothing about that. No row while acli itself is missing,
+// since its Programs row already says so.
+async function jiraRows() {
+  const r = await exec("sh", ["-c", `${SHIMS}command -v acli >/dev/null || exit 127; exec acli jira auth status`], { cwd: home(), timeout: 10_000 }).catch(() => null);
+  if (!r || r.code === 127) return [];
+  const site = r.stdout.match(/Site:\s*(\S+)/)?.[1];
+  return [/Authenticated/.test(r.stdout)
+    ? { group: "programs", state: "ok", name: "Jira sign-in", tag: site ?? "signed in", text: "acli is signed in  —  the Jira board reads with it", fix: null }
+    : { group: "programs", state: "missing", name: "Jira sign-in", tag: "needed", text: "acli is not signed in, so the Jira board reads nothing.", fix: "Open the Jira board (ctrl-a B) and press Enter, or run acli jira auth login --web" }];
+}
+
 // Lific requests (made in the Lific window, mods/lific) need two things no program row shows:
 // Lific's MCP answering, and the program the Lific agent runs.
 async function lificRows() {
-  const chosen = shared(LIFIC_AGENT), runs = program(chosen?.command);
+  const chosen = shared(LIFIC_AGENT), runs = chosen?.agent === "opencode" ? "opencode" : program(chosen?.command);
   const [mcp, where] = await Promise.all([
     handshake(),
     runs ? exec("sh", ["-c", 'command -v "$1"', "sh", runs], { cwd: home(), timeout: 5000 }).then((r) => r.stdout.trim()).catch(() => "") : "",
@@ -154,9 +169,10 @@ async function check() {
   const [on, off] = await Promise.all([dirs(`${root}/mods`), dirs(`${root}/mods-disabled`)]);
   const curtain = shared("curtain")?.on;
   // The Lific handshake needs nothing from the program checks, so it runs beside them.
-  const [prog, herdr, wiring, lific] = await Promise.all([programs(), herdrRows(), wiringRows(on, off), !curtain && on.includes("lific") ? lificRows() : []]);
+  const [prog, herdr, wiring, lific, jira] = await Promise.all([programs(), herdrRows(), wiringRows(on, off),
+    !curtain && on.includes("lific") ? lificRows() : [], on.includes("jira") ? jiraRows() : []]);
   const agents = curtain ? [] : await agentRows(prog.writer, lific);
-  return [...prog.rows, ...agents, ...herdr, ...wiring];
+  return [...prog.rows, ...jira, ...agents, ...herdr, ...wiring];
 }
 
 const names = (rows, state) => rows.filter((r) => r.state === state).map((r) => r.name);

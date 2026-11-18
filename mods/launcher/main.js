@@ -15,11 +15,12 @@
 // is listed first. Reasoning (r) offers that model's effort levels from the same
 // catalog. Choices are kept per agent and resolved model in `reasoning`;
 // Default passes no override. Only agents with a known reasoning flag offer it.
-// A new tab or space also offers its folder, to edit before it is made (f) or
-// choose in the system's folder picker (p, this computer only): untouched, it
-// starts where Herdr would put it anyway. A split stays in its tab's folder,
-// unless it is started in a worktree: the worktree choice is offered for a
-// new tab, split and space alike, for a plain terminal as for an agent.
+// A new tab, split or space also offers its folder, prefilled with the focused
+// pane's, to edit before it is made (f) or choose in the system's folder picker
+// (p, this computer only): untouched, it starts where Herdr would put it anyway;
+// an edited folder starts a split there through IN below. The worktree choice
+// is offered for a new tab, split and space alike, for a plain terminal as for
+// an agent.
 // While editing the folder, arrows / Ctrl+J/K choose a directory and Tab
 // completes it, keeping the field focused for the next path component.
 // Fork uses this same picker with props { fork: { pane, terminal, key, name,
@@ -91,7 +92,11 @@ printf 'claude\\t%s\\n' "\${ANTHROPIC_MODEL:-$(j '.env.ANTHROPIC_MODEL // .model
 printf 'codex\\t%s\\n' "$(awk -F'"' '/^\\[/{exit} /^model[[:space:]]*=/{print $2; exit}' ~/.codex/config.toml 2>/dev/null)"
 printf 'opencode\\t%s\\n' "$(j '.model' ~/.config/opencode/opencode.json)"
 printf 'gemini\\t%s\\n' "$(j '.model.name // (.model | strings)' ~/.gemini/settings.json)"
-printf 'cursor\\t%s\\n' "$(j '.model.displayName // .model.modelId' ~/.cursor/cli-config.json)"`;
+printf 'cursor\\t%s\\n' "$(j '.model.displayName // .model.modelId' ~/.cursor/cli-config.json)"
+printf 'grok\\t%s\\n' "$(awk -F'"' '/^\\[models\\]/{f=1;next} /^\\[/{f=0} f&&/^default[[:space:]]*=/{print $2; exit}' ~/.grok/config.toml 2>/dev/null)"`;
+// The skip-permissions flag of each agent that has one. One from here starts
+// unticked; launcher.json's own `flag` (as DEFAULTS above) keeps its `on`.
+const SKIP_FLAG = { claude: "--dangerously-skip-permissions", codex: "--dangerously-bypass-approvals-and-sandbox", grok: "--always-approve", opencode: "--auto", cursor: "--force" };
 // CLI syntax is separate from model capabilities: the catalog supplies levels.
 const REASONING_FLAG = { claude: ["--effort"], codex: ["-c", "model_reasoning_effort={value}"], grok: ["--reasoning-effort"] };
 const LEVEL_ORDER = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
@@ -112,6 +117,10 @@ const ROW = 28;
 const clean = (s) => (s ?? "").replace(/\u001b\[[0-9;?]*[A-Za-z]/g, "").trim();
 const words = (flag) => (Array.isArray(flag) ? flag : String(flag ?? "").split(/\s+/)).filter(Boolean);
 const inside = (p, dir) => p === dir || p.startsWith(dir + "/");
+// A path that names its folder by itself, with no folder to start from.
+const rooted = (p) => p.startsWith("/") || p === "~" || p.startsWith("~/");
+// Herdr can't start a program in a folder that is gone, and blames the program ("cannot run sh").
+const gone = (error) => /os error 2\b/.test(String(error?.message ?? error));
 // Prints the folder's full path, or fails: "~" is the home of the machine it runs on.
 // Prints the path of the clipboard's file, or of its image saved as a PNG; fails when it holds neither.
 const CLIP = `d="\${TMPDIR:-/tmp}/herdr-launcher"; mkdir -p "$d" || exit 1
@@ -131,7 +140,7 @@ const REPOS = `for d do
   [ -n "$c" ] && printf '%s\\n' "$c"
 done | awk '!seen[$0]++'`;
 const NO_REPO = /not a git repository/i;
-// `pane.split` takes no folder, so a split in a worktree is started through
+// `pane.split` takes no folder, so a split in a worktree or an edited folder is started through
 // this: it goes there, then becomes the agent given, or the person's shell.
 const IN = 'cd "$1" || exit 1; shift; [ "$#" -gt 0 ] && exec "$@"; exec "${SHELL:-/bin/sh}" -l';
 // `wt list` reduced to what the combo box draws, before the mod reads it (ADR 0006):
@@ -220,7 +229,7 @@ export default class Launcher extends View {
     this.inputFocused = false;
     this.input.on("focus", (_e, cx) => { this.inputFocused = true; this.combo = true; this.sync(); cx.notify(); });
     this.input.on("blur", (_e, cx) => { this.inputFocused = false; this.combo = false; cx.notify(); });
-    // A new tab's or space's folder: where the focused pane is, until edited. Here, "~" stands for home.
+    // A new tab's, split's or space's folder: where the focused pane is, until edited. Here, "~" stands for home.
     this.offered = this.cwd ? this.spelled(this.cwd) : "";
     this.folder = InputState.new({ value: this.offered, placeholder: "folder (empty: where Herdr starts it)" });
     this.folderFocused = false;
@@ -334,7 +343,7 @@ export default class Launcher extends View {
     const shown = shortlisted(this.agents) ?? (this.failed ? installed : [...installed, ...this.agents.filter((a) => !a.installed).slice(0, 2)]);
     return [...(this.fork ? [] : [TERMINAL]), ...shown.map((a) => {
       const c = this.cfg?.programs?.[a.key];
-      return { key: a.key, name: a.name, icon: a.icon, tint: a.tint, run: a.run, installed: a.installed, flag: words(c?.flag), on: c?.on !== false, modelFlag: words(c?.modelFlag ?? MODEL_FLAG[a.key]), model: String(c?.model ?? "").trim(), reasoningFlag: words(c?.reasoningFlag ?? REASONING_FLAG[a.key]) };
+      return { key: a.key, name: a.name, icon: a.icon, tint: a.tint, run: a.run, installed: a.installed, flag: words(c?.flag ?? SKIP_FLAG[a.key]), on: c?.flag ? c.on !== false : c?.on === true, modelFlag: words(c?.modelFlag ?? MODEL_FLAG[a.key]), model: String(c?.model ?? "").trim(), reasoningFlag: words(c?.reasoningFlag ?? REASONING_FLAG[a.key]) };
     })];
   }
 
@@ -497,8 +506,8 @@ export default class Launcher extends View {
 
   // How it was opened: prefix + c is a new tab; prefix + v or - passes
   // { place: "right" | "down" }, a split of the focused pane; prefix + N passes
-  // { place: "space" }, a new space. A split stays in its tab's folder, unless
-  // it takes a worktree (IN below); a space's worktree always opens as that space.
+  // { place: "space" }, a new space. A split stays in its tab's folder unless
+  // its folder is edited or it takes a worktree (IN); a space's worktree always opens as that space.
   place() {
     if (this.fork) return "right";
     const place = props()?.place;
@@ -509,14 +518,32 @@ export default class Launcher extends View {
     return this.place() === "right" || this.place() === "down";
   }
 
-  // The folder typed for a new tab or space, as a full path: null when the field was
+  // Whether the folder field is as offered (or emptied): nothing to look up.
+  untouched() {
+    const typed = this.folder.value().trim();
+    return !typed || typed === this.offered;
+  }
+
+  // Split the pane with the agent's command (its task appended), started in
+  // `folder` when one is given, else where the pane is.
+  splitWith(folder, argv, task) {
+    const cmd = argv ? (task.task ? [...argv, task.task] : argv) : null;
+    const pane = this.pane ? { pane: this.pane } : {};
+    if (folder) run("pane.split", { direction: this.place(), ...pane, argv: ["sh", "-c", IN, "sh", folder, ...(cmd ?? [])] });
+    else run("pane.split", { direction: this.place(), ...pane, ...(cmd ? { argv: cmd } : {}) });
+  }
+
+  // The folder typed, as a full path: null when the field was
   // left as offered or emptied. Throws when there is no such folder. In
   // worktree mode it is also where the repository is looked for.
   async settle(cx) {
+    if (this.untouched()) return null;
     const typed = this.folder.value().trim();
-    if (this.split() || !typed || typed === this.offered) return null;
     if (typed === this.settled?.typed) return this.settled.path;
-    const r = await exec("sh", ["-c", RESOLVE, "sh", typed], { cwd: this.folderBase ?? undefined, on: this.on, timeout: 10_000 });
+    const r = await exec("sh", ["-c", RESOLVE, "sh", typed], { cwd: rooted(typed) ? undefined : this.folderBase ?? undefined, on: this.on, timeout: 10_000 }).catch((error) => {
+      if (gone(error)) throw new Error(`No folder at ${typed}`);
+      throw error;
+    });
     const path = r.code === 0 ? r.stdout.trim() : "";
     if (!path) throw new Error(`No folder at ${typed}`);
     this.settled = { typed, path };
@@ -531,7 +558,7 @@ export default class Launcher extends View {
   }
 
   editFolder(cx) {
-    if (this.split() || this.busy) return;
+    if (this.fork || this.busy) return;
     this.search = null;
     this.folder.focus();
     cx.notify();
@@ -556,7 +583,7 @@ export default class Launcher extends View {
       await cx.sleep(80);
       if (!current()) return;
       try {
-        const result = await folderSuggestions(value, exec, { cwd: this.folderBase ?? undefined, on: this.on });
+        const result = await folderSuggestions(value, exec, { cwd: rooted(value) ? undefined : this.folderBase ?? undefined, on: this.on });
         if (!current()) return;
         this.folderMatches = result.items; this.folderMore = result.more;
         this.folderScroll.scroll_to_item(0);
@@ -592,7 +619,7 @@ export default class Launcher extends View {
 
   // The system's folder picker fills the field. It only sees this computer.
   canBrowse() {
-    return this.on === null && !this.split();
+    return this.on === null && !this.fork;
   }
 
   browse(cx) {
@@ -686,6 +713,11 @@ export default class Launcher extends View {
     return this.on === null && inside(path, home()) ? `~${path.slice(home().length)}` : path;
   }
 
+  // The folder the launcher was opened in no longer exists.
+  noFolder() {
+    return `No folder at ${this.spelled(this.cwd)}. Set the folder above (⌃F).`;
+  }
+
   noRepo() {
     return `No Git repository at ${this.cwd ? this.spelled(this.cwd) : "this folder"}.`;
   }
@@ -725,7 +757,10 @@ export default class Launcher extends View {
           throw new Error(clean(r.stderr) || "wt list failed.");
         }
         const chosen = this.opts[this.at];
-        this.list = JSON.parse(r.stdout).map(([branch, path, main, here]) => ({ branch, path, main, here }));
+        // The main checkout leads: from a worktree, wt lists the one you are in first,
+        // which is the one place a new tab here would not need to go.
+        const listed = JSON.parse(r.stdout).map(([branch, path, main, here]) => ({ branch, path, main, here }));
+        this.list = [...listed.filter((w) => w.main), ...listed.filter((w) => !w.main)];
         this.sync();
         // The option highlighted stays highlighted when the fresh list moves it.
         const again = chosen && !chosen.typed ? this.opts.findIndex((w) => w.branch === chosen.branch) : -1;
@@ -740,7 +775,7 @@ export default class Launcher extends View {
         // A failed refresh leaves what was shown; a failed first read says why.
         if (!this.list) {
           this.list = null; this.listNoRepo = false;
-          this.listError = String(error?.message ?? error).split("\n").slice(-3).join("\n");
+          this.listError = gone(error) ? this.noFolder() : String(error?.message ?? error).split("\n").slice(-3).join("\n");
           this.sync();
         }
       } finally {
@@ -769,8 +804,7 @@ export default class Launcher extends View {
     });
   }
 
-  // Moves the folder to a repository offered, keeping the branch typed. A split
-  // has no folder field: only where its worktree is looked for moves.
+  // Moves the folder to a repository offered, keeping the branch typed.
   pickRepo(row, cx) {
     const typed = this.spelled(row.path);
     this.folder.set_value(typed);
@@ -866,14 +900,13 @@ export default class Launcher extends View {
         props: { source: this.fork, target: { key: program.key, name: program.name, run: program.run, argv, ...task } } });
       return;
     }
-    if (this.split() && !this.wt) {
+    // A split or new tab in the folder offered: nothing to look up first.
+    if (this.split() && !this.wt && this.untouched()) {
       this.close();
-      run("pane.split", { direction: this.place(), ...(this.pane ? { pane: this.pane } : {}), ...(argv ? { argv: task.task ? [...argv, task.task] : argv } : {}) });
+      this.splitWith(null, argv, task);
       return;
     }
-    // A new tab in the folder offered: nothing to look up first.
-    const typed = this.folder.value().trim();
-    if (!this.wt && this.place() === "tab" && (!typed || typed === this.offered)) {
+    if (!this.wt && this.place() === "tab" && this.untouched()) {
       this.close();
       run("tab.new", { space: this.space, ...(argv ? { name: program.name, argv, ...task } : {}) });
       return;
@@ -894,7 +927,8 @@ export default class Launcher extends View {
         // Enter in the folder field while no repository was known: the folder is settled, its worktrees are read.
         if (row?.repo) { this.busy = false; this.input.focus(); return cx.notify(); }
         if (!this.wt) {
-          if (this.place() === "space") run("space.new", { machine: this.on ?? "", ...(folder ? { folder } : {}), ...(argv ? { tab: program.name, argv, ...task } : {}) });
+          if (this.split()) this.splitWith(folder, argv, task);
+          else if (this.place() === "space") run("space.new", { machine: this.on ?? "", ...(folder ? { folder } : {}), ...(argv ? { tab: program.name, argv, ...task } : {}) });
           else run("tab.new", { space: this.space, ...(folder ? { folder } : {}), ...(argv ? { name: program.name, argv, ...task } : {}) });
           return this.close();
         }
@@ -907,7 +941,7 @@ export default class Launcher extends View {
         cx.notify();
         this.error = await this.worktree(row, program, argv, task);
       }
-      catch (error) { this.error = String(error?.message ?? error); }
+      catch (error) { this.error = gone(error) && this.cwd ? this.noFolder() : String(error?.message ?? error); }
       this.busy = false;
       if (!this.error) this.close();
       cx.notify();
@@ -944,7 +978,7 @@ export default class Launcher extends View {
     if (r.code !== 0 || !made?.path) return clean(r.stderr).split("\n").slice(-3).join("\n") || "wt switch failed.";
     for (const key of [...LISTS.keys()]) if (key.startsWith(`${this.on ?? ""}\n`)) LISTS.delete(key);
     if (this.split()) {
-      run("pane.split", { direction: this.place(), ...(this.pane ? { pane: this.pane } : {}), argv: ["sh", "-c", IN, "sh", made.path, ...(argv ? (task.task ? [...argv, task.task] : argv) : [])] });
+      this.splitWith(made.path, argv, task);
       return "";
     }
     const tab = argv ? { name: program.name, argv, ...task } : {};
@@ -1298,7 +1332,7 @@ export default class Launcher extends View {
         .child(svg("mods/files/folder.svg").size(13).flex_none().text_color(t.muted))
         .child(div().flex_none().max_w(200).truncate().text_color(t.foreground).child(w.branch))
         .child(div().flex_1().min_w(0).truncate().font_family(mono).text_size(11).text_color(t.dim).child(this.spelled(w.path)));
-      const note = w.sentence ? `named for you · ${from}` : w.generated ? `generated name · ${from}` : w.typed ? (w.create ? from : "worktrunk shortcut") : w.here ? "you are here" : w.main ? "main checkout" : w.path ? "worktree" : "branch";
+      const note = w.sentence ? `named for you · ${from}` : w.generated ? `generated name · ${from}` : w.typed ? (w.create ? from : w.branch === "^" ? "main checkout" : "worktrunk shortcut") : w.here ? (w.main ? "main checkout · you are here" : "you are here") : w.main ? "main checkout · ^" : w.path ? "worktree" : "branch";
       return row
         .child(div().flex_none().w(10).text_color(w.typed && w.create ? t.accent : t.dim).child(w.typed && w.create ? "+" : w.path ? "●" : "○"))
         .child(div().flex_1().min_w(0).truncate().text_color(t.foreground).child(w.branch))
@@ -1358,7 +1392,7 @@ export default class Launcher extends View {
         .when(Boolean(this.cfg) && !this.models, (el) => el.when(this.search !== null, (el) => el.child(searchBar)).child(chips).child(flag)
           .when(!cur.terminal && !cur.none, (el) => el.child(model)
             .when(Boolean(cur.reasoningFlag?.length), (el) => el.child(reasoning)))
-          .when(!split, (el) => el.child(folder))
+          .when(!this.fork, (el) => el.child(folder))
           .when(this.takesMessage(), (el) => el.child(message).when(this.on === null && this.files.length > 0, (el) => el.child(files)))
           .when(!this.fork && this.canWorktree(), (el) => el.child(div().h(1).bg(t.border)).child(worktree)).when(!this.fork && this.canWorktree() && this.wt, (el) => el.child(wtBody)))
         .when(Boolean(this.error), (el) => el.child(div().text_color(t.blocked).child(this.error)))

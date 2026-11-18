@@ -19,6 +19,8 @@
 //   pull:     <herdr-context from="t5y" name="…" agent="…">its output</herdr-context>
 //             plus one line saying how to ask t5y for more, then what you type.
 //   y           copy that output to the clipboard · t copy the pane title
+//   c / C       copy a reference to the selected agent / its bare address, for pasting
+//               into another session (mods/pane-reference builds it; the hub stays up)
 //   g           go to the agent and close the hub
 //   /           focus the sidebar search (esc steps out, then clears; enter keeps the filter)
 //   j k ↑ ↓ 1-9 select · a this space / all spaces · r refresh · q esc close
@@ -244,6 +246,14 @@ export default class AgentHub extends View {
     this.close();
   }
 
+  // Copy reference is owned by mods/pane-reference: name the agent, then ask it.
+  reference(bare) {
+    const a = this.current();
+    if (!a) return;
+    setShared("pane-reference.ask", { terminal: a.address, bare, n: Date.now() });
+    run("pane-reference.ask");
+  }
+
   copyTitle(cx) {
     const a = this.current();
     if (!a) return;
@@ -288,6 +298,7 @@ export default class AgentHub extends View {
       k: () => this.move(-1, cx), up: () => this.move(-1, cx),
       enter: () => this.message(), i: () => this.message(),
       p: () => this.pull(cx), y: () => this.copy(cx), t: () => this.copyTitle(cx), g: () => this.go(),
+      c: () => this.reference(Boolean(m.shift)),
       r: () => this.read(cx, true), a: () => this.toggleScope(cx), q: () => this.close(), escape: () => this.close(),
     };
     if (map[k]) { map[k](); cx.stop_propagation(); return; }
@@ -367,7 +378,7 @@ export default class AgentHub extends View {
         .child(v_flex().id("ah-list").absolute().inset_0().p(6).gap(2).overflow_y_scroll().track_scroll(this.listScroll)
           .children(list.length ? list.map(row) : [div().p(12).text_size(12).text_color(t.muted).child(this.query ? `Nothing matches "${this.query}".${this.all ? "" : " Choose All spaces to search every space."}` : this.all ? "No agents running." : "No agents in this space. Press a for all spaces.")])))
       .child(div().px(12).py(7).flex_none().border_t(1).border_color(t.border).text_size(10.5).text_color(t.dim)
-        .child(this.typing ? "↑ ↓ select · ↵ keep filter · esc leave field" : `j k ↑ ↓ select · / search${this.query ? " · esc clear" : ""}`));
+        .child(this.typing ? "↑ ↓ select · ↵ keep filter · esc leave field" : `j k ↑ ↓ select · / search · c reference${this.query ? " · esc clear" : ""}`));
 
     const unread = Boolean(cur) && this.text[cur.address] === undefined;
     const lines = cur && !unread ? this.text[cur.address].split("\n") : [];

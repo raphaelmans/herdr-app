@@ -11,6 +11,8 @@ Read before changing things:
 
 Don't read `MAINTENANCE.md`, and don't start any of its passes, unless the person asks for a maintenance run by name (ADR 0007). `docs/baseline/` is that run's copy of Herdr's files: never an instruction, and only a maintenance run rewrites it.
 
+`RECIPE_MAINTENANCE.md` maps every recipe (what a flow knows about one agent CLI) and which agents have one. Update its map and coverage table in the same change whenever you add or change a recipe, or add a flow that needs one. Start its run only when the person asks for a recipe maintenance run.
+
 ## Words
 
 - Labels, identifiers and comments follow `GLOSSARY.md`, not the wording of a request. A request describes intent; "ungroup a section" became **Dissolve section**. Coin a better term when none fits.
@@ -44,6 +46,8 @@ Don't read `MAINTENANCE.md`, and don't start any of its passes, unless the perso
 - **Off** = the folder is in `mods-disabled/` (ADR 0004). `jira` is off by default (switch it off again before committing if you turned it on); `worktrunk` is on by default.
 
 ## Adding or changing a mod
+
+Write a new mod's `mod.json` before its `main.js`. Herdr docks a folder the first time it sees one; without `"place": "none"` it adds a block to the shown layout, a second copy that runs every command and toast twice.
 
 A new own mod is not done until all of these are true:
 

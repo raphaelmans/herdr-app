@@ -1,0 +1,5 @@
+{
+  "name": "lific-session",
+  "version": "1.0.0",
+  "description": "The lific skill, loaded only into the Lific session (mods/lific)."
+}

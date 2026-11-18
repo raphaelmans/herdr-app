@@ -197,6 +197,9 @@ How much reasoning effort a model uses. Available levels belong to the model; De
 What one flow knows about one agent, such as how to ask it for a single answer or how to fork its session. An installed agent with no recipe for a flow is still listed there, marked as not usable yet.
 _Avoid_: preset, support, integration
 
+**Recipe maintenance run**:
+One sitting, asked for by the person, in which every flow's recipes are checked against the agent CLIs installed now: broken ones are fixed, missing ones are added or marked as impossible. `RECIPE_MAINTENANCE.md` is its procedure and holds the coverage table.
+
 **Model catalog**:
 The models each offered agent can be started with, kept in `models.json`: for most agents the newest of each family that anyone can use, taken from models.dev; for an agent that lists its own models (Cursor, Grok), the ones it lists for the signed-in account. An agent with no recipe for it has no catalog. Wherever a model is picked, the choices are the catalog's; a model it does not have can still be typed.
 _Avoid_: model list (that is the Launcher's list of them), registry, models.dev (for our copy)
@@ -249,6 +252,14 @@ _Avoid_: clone (that is for mods and layouts), duplicate, branch
 Passing a session on to a different agent CLI: the source writes a summary of where things stand and sends it to the new agent as a message.
 _Avoid_: transfer, migrate, fork (that keeps the same CLI)
 
+**Address**:
+herdr-core's name for a terminal, such as `t63`; a terminal on another machine carries that machine's name, as `hc ls` prints it. It lasts as long as the terminal, and it is what `hc read` and `hc send` take.
+_Avoid_: session ID (a session is the conversation), terminal ID, pane ID
+
+**Reference**:
+Text that points an agent at another terminal by its address and says how to read and message it. It is pasted, not sent, and holds no screen output.
+_Avoid_: link, handle, mention, pull (a pull brings output)
+
 **Agent hub**:
 The window that lists the running agents with each one's recent screen.
 _Avoid_: Agents sidebar, switcher, dashboard
@@ -270,12 +281,20 @@ Giving one item from a mod, such as an issue, to the pane you came from as the s
 _Avoid_: send, assign, pull
 
 **Lific request**:
-What the person asks to be done in Lific, in their own words: a new issue, a status, a comment. It is typed in the Lific window's request box and works in the project shown there, unless the words name another.
+What the person asks of Lific, in their own words: a new issue, a status, a comment, or a question about the work. It is typed in the Lific window's request box, goes to the Lific session, and works in the project shown there unless the words name another.
 _Avoid_: message (that is between agents), command, prompt, chat
 
+**Lific session**:
+A standing, interactive agent that holds Lific as a whole: every project, issue, page and plan. It can reach nothing but Lific's own tools, and is focused by its own system prompt and the lific skill. It runs in a tab of its own, where the person can talk to it directly, and it outlives the Lific window. Lific requests go to the session in use, and one starts when none is live.
+_Avoid_: run, one-shot, bot, assistant, chat
+
 **Lific agent**:
-The agent and model chosen to carry out Lific requests. It is started once per request and can reach nothing but Lific's own tools. It is a separate choice from the Writer, which only writes.
-_Avoid_: Writer (that one has no tools), bot, assistant, MCP (that is how it reaches Lific)
+The agent and model a Lific session runs, chosen on Config → Lific. It is a separate choice from the Writer, which only writes.
+_Avoid_: Writer (that one has no tools), MCP (that is how it reaches Lific)
+
+**Board order**:
+The order of the projects along the top of the Lific window. It belongs to the window and is kept by it, not by Lific.
+_Avoid_: sort order (that is Lific's own), ranking
 
 ### Text written for you
 

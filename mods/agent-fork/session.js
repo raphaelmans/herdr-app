@@ -2,7 +2,7 @@ import { appHome, exec, home, knownAgents, panes, readTextFile, spaces } from "h
 
 const executable = (value) => String(value ?? "").split(/[\\/]/).pop().replace(/\.(exe|cmd|bat)$/i, "").toLowerCase();
 const identity = (value) => executable(value).replace(/[^a-z0-9]/g, "");
-export const supportsFork = (key) => ["claude", "claude-code", "codex"].includes(key);
+export const supportsFork = (key) => ["claude", "claude-code", "codex", "grok", "opencode"].includes(key);
 
 export function detectAgent(pane, terminal, catalog) {
   const fg = terminal.foreground ?? {};
@@ -63,9 +63,27 @@ async function nativePlan(source, target) {
     const id = /rollout-[^\s/]*?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl/.exec(open?.stdout ?? "")?.[1];
     return { argv: [...argv, "fork", id || "--last", ...prompt], guessed: !id };
   }
+  // A JSON list an agent wrote, or [] when it isn't one.
+  const list = (text) => { try { const v = JSON.parse(text || "[]"); return Array.isArray(v) ? v : []; } catch { return []; } };
+  const root = async () => on ? (await exec("sh", ["-c", 'printf %s "$HOME"'], { on, timeout: 5000 })).stdout.trim() : home();
+  if (agent.key === "grok") {
+    // Grok lists its open sessions with the pid that holds each one.
+    const at = fg.pid ? await root() : null;
+    const raw = at ? await readTextFile(at + "/.grok/active_sessions.json", { on }).catch(() => null) : null;
+    const id = list(raw).find((s) => s?.pid === fg.pid)?.session_id;
+    return { argv: [...argv, ...(id ? ["--resume", id] : ["--continue"]), "--fork-session", ...prompt], guessed: !id };
+  }
+  if (agent.key === "opencode") {
+    // OpenCode keeps no pid per session: take its latest session in this
+    // folder by id, so another one started meanwhile can't be picked.
+    const listed = await exec(agent.run?.[0] || "opencode", ["session", "list", "--format", "json", "-n", "50"], { on, cwd: folder || undefined, timeout: 15000 }).catch(() => null);
+    const id = folder ? list(listed?.stdout).find((s) => s?.directory === folder)?.id : null;
+    const ask = target.task ? ["--prompt", target.task] : []; // its positional argument is a folder
+    return { argv: [...argv, ...(id ? ["--session", id] : ["--continue"]), "--fork", ...ask], guessed: true };
+  }
   if (agent.key === "claude" || agent.key === "claude-code") {
-    const root = on ? (await exec("sh", ["-c", 'printf %s "$HOME"'], { on, timeout: 5000 })).stdout.trim() : home();
-    const raw = fg.pid && root ? await readTextFile(root + "/.claude/sessions/" + fg.pid + ".json", { on }).catch(() => null) : null;
+    const dir = await root();
+    const raw = fg.pid && dir ? await readTextFile(dir + "/.claude/sessions/" + fg.pid + ".json", { on }).catch(() => null) : null;
     const session = raw ? JSON.parse(raw) : null;
     if (!session?.sessionId) return { argv: [...argv, "--continue", "--fork-session", ...prompt], guessed: true };
     // Claude's background resume copies a running session. Keep the chosen

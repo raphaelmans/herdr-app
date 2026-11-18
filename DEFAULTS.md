@@ -19,6 +19,8 @@ git checkout -- keys.json     # one file back to its default
 
 Never run `git checkout -- .` or `git clean`: most of this folder is Herdr's own and untracked on purpose.
 
+The Launcher's skip-permissions flag is ticked by default for Claude Code and Codex (`launcher.json` `programs.<agent>`, flag and `on` both written there). Grok (`--always-approve`), OpenCode (`--auto`) and Cursor (`--force`) get theirs from the Launcher's own table, unticked; `space` ticks one and saves `on: true`.
+
 The Launcher's reasoning choice lives in `launcher.json` under `programs.<agent>.reasoning.<model id>`. It defaults to absent (the agent's own effort). Set it with the Launcher's Reasoning buttons or `r` (`ctrl-r` while typing); choose Default to remove the launch override. Each agent and model remembers its own choice.
 
 ## 2. Mods on and off
@@ -50,7 +52,7 @@ These live in `shared.json`, which git does not hold. "Absent" means the key is 
 |---|---|---|---|
 | Agent shortlist | `agents.shortlist` | `["claude","codex"]` (absent: every installed agent) | Config → Agents |
 | Writer | `writer` | Claude Code with `claude-haiku-5-5`; Codex's model `gpt-6-luna` | Config → Writer |
-| Lific agent | `lific.agent` | Claude Code with `claude-haiku-5-5` | Config → Lific |
+| Lific agent | `lific.agent` | Claude Code with `claude-sonnet-5-5` | Config → Lific |
 | Starred models | `models.starred` | claude: `claude-opus-5-5`, `claude-fable-5-2`; codex: `gpt-6.1-sol`, `gpt-6-astra` | Config → Models |
 | Worktrunk follows the Writer | `worktrunk.follows` | `true` while the mod is on (absent: not following); does nothing while off | Config → Worktrunk |
 | Curtain | `curtain` | lifted (`on: false`) | Config → Curtain |
@@ -79,7 +81,7 @@ cd ~/.config/herdr-app && cp shared.json shared.json.before-reset && jq '
 
 `writer` is deleted rather than written: on the next start Config settles it to Claude Code with `claude-haiku-5-5`, and builds the command for this machine. Check it on Config → Writer afterwards. `lific.agent` is settled the same way; check it on Config → Lific.
 
-Not choices, so leave them alone: `layout`, `health`, `config.page`, `agents.order`, `models.synced`, `worktrunk.enabled`, `pane-geo`, `lific.ask`, `lific.ack`, and anything starting `viz.`, `send-box.`, `skillshare.`, `win98.` or `frame.`. The mods rewrite these as they run.
+Not choices, so leave them alone: `layout`, `health`, `config.page`, `agents.order`, `models.synced`, `worktrunk.enabled`, `pane-geo`, `lific.ask`, `lific.ack`, `lific.session`, and anything starting `viz.`, `send-box.`, `skillshare.`, `win98.` or `frame.`. The mods rewrite these as they run.
 
 ## 5. Each mod's own memory
 

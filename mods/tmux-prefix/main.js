@@ -31,6 +31,8 @@ const BINDINGS = [
   ["!", "Break pane to new tab", "pane-break"],
   ["[", "Copy mode", "copy-mode"],
   ["y", "Copy pane title", "copy-title"],
+  ["R", "Copy reference", "pane-reference.copy"],
+  ["@", "Copy address", "pane-reference.copy-address"],
   ["N", "New space…", "launcher", { place: "space" }],
   ["W", "Rename space", "space.rename"],
   ["D", "Close space", "space.close"],

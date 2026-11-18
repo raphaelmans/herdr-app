@@ -69,7 +69,8 @@
     "cmd-shift-a": "mod.open:viz",
     "cmd-alt-a": "viz.annotate",
     "cmd-shift-m": "mod.open:config",
-    "cmd-shift-h": "curtain.toggle"
+    "cmd-shift-h": "curtain.toggle",
+    "cmd-shift-c": "pane-reference.copy"
   },
   "terminal": {
     "cmd-c": "terminal.copy",

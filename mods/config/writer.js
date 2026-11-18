@@ -24,6 +24,9 @@ import { ago, catalog, load, offered as models, starred, synced } from "./models
 const KEY = "writer";
 export const quote = (s) => `'${s.replace(/'/g, `'\\''`)}'`;
 export const pick = (flag, m) => (m ? ` ${flag} ${quote(m)}` : "");
+// Grok also loads Claude Code's and Cursor's MCP servers, hooks, skills, rules
+// and agents, and runs those hooks; a recipe of ours wants none of them.
+export const GROK_OWN = ["CLAUDE", "CURSOR"].flatMap((v) => ["MCPS", "HOOKS", "SKILLS", "RULES", "AGENTS"].map((k) => `GROK_${v}_${k}_ENABLED=0`)).join(" ") + " GROK_MEMORY=0";
 // One-shot, no tools, prompt on stdin, only the answer on stdout. `models` are
 // the suggestions until the catalog has the agent's: any model the agent
 // accepts can be typed; none is its default.
@@ -39,6 +42,17 @@ const RECIPES = {
   opencode: {
     name: "OpenCode", model: "", models: [], hint: "provider/model",
     command: (m) => `opencode run --pure${pick("-m", m)} "$(cat)"`,
+  },
+  // Grok has no flag that skips saving the session; the run is one turn with no tools.
+  grok: {
+    name: "Grok", model: "grok-4.7-build-fast", models: ["grok-4.7-build-fast", "grok-4.7"],
+    command: (m) => `${GROK_OWN} grok --prompt-file /dev/stdin --tools '' --no-subagents --disable-web-search --max-turns 1${pick("-m", m)}`,
+  },
+  // Cursor's tools can't be taken away: ask mode keeps it read-only. Its Auto
+  // model can take minutes, so a model is named.
+  cursor: {
+    name: "Cursor", model: "composer-2.5", models: ["composer-2.5"],
+    command: (m) => `cursor-agent -p --mode ask --output-format text --trust${pick("--model", m)} "$(cat)"`,
   },
 };
 const CUSTOM = "custom";
@@ -143,6 +157,9 @@ export default class Writer {
     publish(this.kind, cfg, cx); this.result = null; this.fill(); cx.notify();
   }
 
+  // Whether "Try it" is running; a page whose try is not the one-shot pipe overrides it with test().
+  busy() { return Boolean(this.testing); }
+
   test(cx) {
     const command = shared(this.kind.key)?.command;
     if (this.testing || !command) return;
@@ -210,8 +227,8 @@ export default class Writer {
         .text_color(r.ok ? t.foreground : t.blocked).child(r.ok ? `${r.text}  ·  ${(r.ms / 1000).toFixed(1)}s` : r.text)))
       .child(h_flex().flex_none().px(4).justify_end()
         .child(h_flex().id("writer-test").flex_none().h(30).px(14).gap(7).items_center().rounded(8).bg(t.solid).text_color(t.solid_foreground).text_size(12)
-          .when(!this.testing, (b) => b.cursor_pointer().hover((s) => s.opacity(0.88))).on_click((_e, cx) => this.test(cx))
-          .when(Boolean(this.testing), (b) => b.child(svg("mods/workspace-chrome/spinner.svg").size(12).spin(900)))
-          .child(this.testing ? kind.trying : "Try it")));
+          .when(!this.busy(), (b) => b.cursor_pointer().hover((s) => s.opacity(0.88))).on_click((_e, cx) => this.test(cx))
+          .when(this.busy(), (b) => b.child(svg("mods/workspace-chrome/spinner.svg").size(12).spin(900)))
+          .child(this.busy() ? kind.trying : kind.tryLabel ?? "Try it")));
   }
 }
