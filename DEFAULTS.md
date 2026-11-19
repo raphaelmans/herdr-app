@@ -85,7 +85,7 @@ Not choices, so leave them alone: `layout`, `health`, `config.page`, `agents.ord
 
 ## 5. Each mod's own memory
 
-`data/<mod>/store*.json` holds what one mod remembers (Lific's project per space, the Jira board's filter and scope, the Pull requests window's organization and what it read last). The default is no file:
+`data/<mod>/store*.json` holds what one mod remembers (Lific's project per space, the Jira board's filter and scope). The default is no file:
 
 ```sh
 rm -rf ~/.config/herdr-app/data/jira     # that mod starts fresh the next time it opens

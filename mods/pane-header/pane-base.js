@@ -1,7 +1,7 @@
 // A pane's header, for layouts that frame their panes:
 //   { "tab": "active", "pane": { "header": { "content": { "mod": "pane" } } } }
-// Shows the program's icon (the app's program table), the tab's title (Auto
-// Title's), else the agent's name or the terminal's title, the folder, the
+// Shows the program's icon (the app's program table), the pane's title, the
+// folder, the
 // agent's model (model.js) and its status; buttons split, zoom and close
 // this pane. Props from the app: { pane, terminal }. Click: focus the pane.
 
@@ -9,6 +9,7 @@ import { View, div, svg, image } from "gpui-kit";
 import { h_flex } from "gpui-base";
 import { panes, props, run, theme, home, layout, spaces, terminals, hc } from "herdr";
 import { fromLabel, fromText } from "./model.js";
+import { agentTitle } from "./title.js";
 
 // Match the first visible tab frame, including the active child of a stack.
 function paneFrame(node) {
@@ -108,7 +109,18 @@ export default class Pane extends View {
     const t = theme();
     const p = this.me();
     if (!p) return div();
-    const name = (p.terminal && (ownTitle(p.terminal) || tabTitle(p.tab))) || ((p.program?.agent || p.program?.shell) && p.program.name) || p.title || p.program?.name || "shell";
+    // An agent's pane reads as its Agents sidebar row does. Alone in its tab:
+    // the tab's name once someone named it (Regenerate title renames the tab),
+    // else the agent's own title. With other agents there: the title kept on
+    // its terminal, else its own; never the shared tab's name.
+    let own = "";
+    const tab = p.terminal ? tabTitle(p.tab) : "";
+    if (p.terminal && p.program?.agent) {
+      const many = panes().filter((x) => x.tab === p.tab && x.program?.agent).length > 1;
+      own = many ? ownTitle(p.terminal) || agentTitle(p.title, p.program)
+        : (tab && tab !== p.program.name ? tab : "") || agentTitle(p.title, p.program);
+    }
+    const name = own || tab || ((p.program?.agent || p.program?.shell) && p.program.name) || p.title || p.program?.name || "shell";
     const pic = icon(p.program, 14, t.dim);
     const st = p.status;
     const model = p.program?.agent ? fromLabel(terminals().find((k) => k.address === p.terminal)?.labels) || this.model : "";

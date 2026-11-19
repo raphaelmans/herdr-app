@@ -20,3 +20,5 @@ Whatever the pause:
 **Consequences:** a new search picks its row from the table and names its constant; a pause above 250 ms needs the Enter shortcut, or it reads as lag. The main view's spinner in the Git mod appears only after 180 ms, so quick reads don't flash one.
 
 **Note (ADR 0011):** the Git mod's 180 ms main-view spinner now lives on the `lazygit-mod` branch.
+
+**Note (ADR 0012):** the Pull requests window in the table now lives on the `pull-requests-mod` branch; Jira still settles this way.

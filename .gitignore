@@ -62,7 +62,6 @@ mods/*
 !mods/file-picker/
 !mods/md-popup/
 !mods/lazygit/
-!mods/pull-requests/
 !mods/*/*.js
 !mods/*/mod.json
 !mods/config/vendored.json

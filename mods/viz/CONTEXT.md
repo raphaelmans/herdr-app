@@ -34,6 +34,10 @@ _Avoid_: asset, figure
 An embed showing a snapshot of a rich web page, which can also be opened live.
 _Avoid_: HTML embed, screenshot, iframe
 
+**Expand**:
+Showing one embed in a window of its own, fitted to the window, to zoom into and move around. The embed in the document stays as it was.
+_Avoid_: lightbox, popup, fullscreen, zoom (for the window: zoom is what is done inside it)
+
 **Block**:
 The smallest piece of an artifact that can be picked: one heading, paragraph, list item, table, quote, code block or embed.
 _Avoid_: part, segment, line, section

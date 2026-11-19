@@ -13,9 +13,10 @@
     "codex": {
       "flag": "--dangerously-bypass-approvals-and-sandbox",
       "on": true,
-      "model": "",
+      "model": "gpt-6.2-astra",
       "reasoning": {
-        "gpt-6-astra": "max"
+        "gpt-6-astra": "max",
+        "gpt-6.2-astra": "medium"
       }
     }
   },

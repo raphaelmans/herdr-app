@@ -296,6 +296,24 @@ _Avoid_: Writer (that one has no tools), MCP (that is how it reaches Lific)
 The order of the projects along the top of the Lific window. It belongs to the window and is kept by it, not by Lific.
 _Avoid_: sort order (that is Lific's own), ranking
 
+### Boards and connectors
+
+**Board**:
+A mod that shows another tool's issues, such as the Jira board. A board only reads its tool and knows nothing of what is done with its issues elsewhere.
+_Avoid_: panel, view, client
+
+**Connector**:
+A mod that takes an issue from one board into another tool, such as Jira into Lific. The boards on either side do not know it exists.
+_Avoid_: integration, bridge, sync, plugin
+
+**Bring in**:
+What a connector does with one issue: make its tracking issue the first time, and on any later bring-in update only what the source tool owns. It happens only when asked.
+_Avoid_: import (that is Lific's own command), sync, copy, refresh
+
+**Tracking issue**:
+The Lific issue that stands for one Jira issue. Work on it, and on the Lific issues linked to it, happens in Lific; Jira stays as the team left it.
+_Avoid_: mirror, copy, clone (that is for mods), parent, main issue
+
 ### Text written for you
 
 **Writer**:
@@ -305,20 +323,6 @@ _Avoid_: generator, title command, AI
 **Commit message**:
 The whole text of a commit: the one line that names it and, for a larger change, a paragraph under it. Worktrunk has its own commit writer for these, which can follow the Writer.
 _Avoid_: commit summary, commit subject (for the whole text)
-
-### GitHub
-
-**Organization**:
-A GitHub organization the account signed in on this computer belongs to. The Pull requests window lists the repositories of the one selected.
-_Avoid_: org, team, account (the account is who is signed in on this computer)
-
-**Pull request**:
-A proposed change GitHub has in one repository of the selected organization.
-_Avoid_: pull (that is bringing another agent's output), PR
-
-**Pull requests**:
-The window that lists an organization's repositories and the pull requests of the repository selected.
-_Avoid_: GitHub panel, pulls, prs
 
 ### The window
 

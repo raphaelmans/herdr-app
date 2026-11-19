@@ -14,4 +14,4 @@ We rejected a shared cache module (a mod can't import another mod's files, and e
 
 **Consequences:** stale-by-design is accepted: a kept list can be up to its age old until `r`. Conditional requests (gh's ETag / 304, free of rate limit) would replace ages for GitHub and are still to do. None of the gains were timed in the live window; they come from fewer spawns and less parsing by construction.
 
-**Note (ADR 0011):** the Git mod examples now live on the `lazygit-mod` branch; Pull requests and Jira still follow every rule here.
+**Note (ADR 0011):** the Git mod examples now live on the `lazygit-mod` branch, and Pull requests' on `pull-requests-mod` (ADR 0012); Jira still follows every rule here.

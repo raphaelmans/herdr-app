@@ -6,6 +6,7 @@ import { h_flex, v_flex, TextView } from "gpui-base";
 import { appHome, exec, theme } from "herdr";
 import * as fs from "fs/promises";
 import { palette, renderMermaid } from "./mermaid.js";
+import { MIN_INLINE } from "./zoom.js";
 import { dirOf, readDoc, relOf } from "./store.js";
 
 const CACHE = "mods/viz/.cache";
@@ -14,8 +15,8 @@ const EMBED_LINE = /^\s*!\[([^\]]*)\]\(([^)\s]+)\)\s*$/;
 // Diagrams already drawn this run: cache name -> {name, w, h} | {error}.
 const drawn = new Map();
 
-// FNV-1a: the cache name of a diagram.
-function hashOf(s) {
+// FNV-1a: the cache name of a diagram (and of an enlarged copy, ./expand.js).
+export function hashOf(s) {
   let h = 0x811c9dc5;
   for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193) >>> 0;
   return h.toString(16).padStart(8, "0") + s.length.toString(16);
@@ -109,7 +110,7 @@ async function diagram(source) {
   return d;
 }
 
-// Blocks ready to draw: {kind: "prose", type, text} | {kind: "picture", src, w, h, caption, live?} | {kind: "error", note}.
+// Blocks ready to draw: {kind: "prose", type, text} | {kind: "picture", src, w, h, vector, caption, live?} | {kind: "error", note}.
 // Each keeps its lines (from, to) and its source (text).
 export async function build(a) {
   const parts = [];
@@ -133,26 +134,41 @@ export async function build(a) {
     }
     parts.push({ ...at, kind: "picture", type: e.kind, src: `${relOf(a.id)}/${seg.file}`, w: e.w || 800, h: e.h || 600, caption: seg.caption });
   }
+  // An SVG may be drawn larger than its size; worked out once here, read when drawn and expanded.
+  for (const p of parts) if (p.kind === "picture") p.vector = /\.svg$/i.test(p.src);
   return parts;
 }
 
 // The space under a block: list items sit close together.
 export const pad = (p) => (p.type === "item" ? 1 : 8);
 
-export function part(p, key, avail, t, selectable = true) {
-  if (p.kind === "prose") return TextView.markdown(key, p.text).selectable(selectable);
-  const openLive = (live) => div().id(`${key}-live`).px(6).py(1).rounded(4).text_size(11).text_color(t.accent)
-    .hover((s) => s.bg(t.hover)).on_click(() => exec("open", [live]).catch(() => {})).child("Open live page ↗");
+// Drawn width of a picture in a document `avail` wide. A diagram or chart shrinks to fit only down
+// to MIN_INLINE of its size, and past that scrolls sideways; a screenshot always fits.
+const inlineWidth = (p, avail) =>
+  Math.max(40, Math.min(p.w, p.vector ? Math.max(avail, p.w * MIN_INLINE) : avail));
+
+// `expand`: what a click on a picture does. Null while annotating, where a click picks the block
+// and prose isn't selectable.
+export function part(p, key, avail, t, expand = null) {
+  if (p.kind === "prose") return TextView.markdown(key, p.text).selectable(Boolean(expand));
+  const link = (id, text, onClick) => div().id(`${key}-${id}`).px(6).py(1).rounded(4).text_size(11).text_color(t.accent)
+    .hover((s) => s.bg(t.hover)).on_click(onClick).child(text);
+  const openLive = (live) => link("live", "Open live page ↗", () => exec("open", [live]).catch(() => {}));
   if (p.kind === "picture") {
-    const w = Math.max(40, Math.min(p.w, avail));
-    const caption = p.caption || p.live
-      ? h_flex().gap(8).justify_center().items_center()
-          .when(Boolean(p.caption), (el) => el.child(div().text_size(11.5).text_color(t.dim).child(p.caption)))
-          .when(Boolean(p.live), (el) => el.child(openLive(p.live)))
-      : null;
+    const w = inlineWidth(p, avail);
+    const wide = w > avail + 0.5;
+    const pic = div().id(`${key}-pic`).flex_none().rounded(6).overflow_hidden().border_1().border_color(t.border)
+      .when(Boolean(expand), (el) => el.cursor_pointer().on_click(() => expand(p)))
+      .child(image(p.src).w(w).h((w * p.h) / p.w));
+    const caption = h_flex().gap(8).justify_center().items_center()
+      .when(Boolean(p.caption), (el) => el.child(div().text_size(11.5).text_color(t.dim).child(p.caption)))
+      .when(Boolean(expand), (el) => el.child(link("expand", "Expand ⤢", () => expand(p))))
+      .when(Boolean(p.live), (el) => el.child(openLive(p.live)));
     return v_flex().w_full().items_center().gap(4).py(6)
-      .child(div().rounded(6).overflow_hidden().border_1().border_color(t.border).child(image(p.src).w(w).h((w * p.h) / p.w)))
-      .when(Boolean(caption), (el) => el.child(caption));
+      .child(wide
+        ? div().id(`${key}-wide`).w_full().overflow_x_scrollbar().pb(8).child(pic)
+        : pic)
+      .when(Boolean(p.caption || p.live || expand), (el) => el.child(caption));
   }
   return h_flex().p(8).gap(8).rounded(4).border(1).border_color(t.blocked).text_size(12).text_color(t.muted)
     .child(p.note).when(Boolean(p.live), (el) => el.child(openLive(p.live)));

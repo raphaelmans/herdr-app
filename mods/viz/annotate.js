@@ -15,6 +15,7 @@ import { div } from "gpui-kit";
 import { h_flex, v_flex, TextareaState, Textarea } from "gpui-base";
 import { exec, focused, notify, panes } from "herdr";
 import { nameOf, pad, part, sourceOf } from "./render.js";
+import { openExpand } from "./expand.js";
 import { docOf, writeNotes } from "./store.js";
 
 const GUTTER = 22;
@@ -292,6 +293,13 @@ export function keys(v, e, cx) {
     return;
   }
   if (k === "a") { setMode(v, !v.mode); return done(); }
+  // Expand the picture at the cursor, else the next one after it, else the first.
+  if (k === "e") {
+    const pics = v.parts.map((p, i) => (p.kind === "picture" ? i : -1)).filter((i) => i >= 0);
+    const i = pics.find((i) => i >= (v.cursor ?? 0)) ?? pics[0];
+    if (i != null) openExpand(v.parts[i], v.artifact?.title ?? "");
+    return done();
+  }
   if (!v.mode) {
     // Moving or commenting turns annotating on.
     if (!["j", "k", "g", "G", "v", "i", "n", "N"].includes(k) && !["down", "up", "enter"].includes(e.key)) return;
@@ -330,8 +338,8 @@ export function keys(v, e, cx) {
 }
 
 export const hints = (v) => (v.mode
-  ? "click or drag blocks · j k move · v range · ↵ comment · c copy · n N next · d d remove · S send · esc back"
-  : "a annotate · n N annotations · S send");
+  ? "click or drag blocks · j k move · v range · ↵ comment · e expand · c copy · n N next · d d remove · S send · esc back"
+  : "a annotate · e expand a picture · n N annotations · S send");
 
 const pill = (text, t) => div().h(20).px(7).flex().items_center().rounded(6).bg(t.foreground)
   .text_size(11.5).font_medium().text_color(t.background).child(text);
@@ -381,7 +389,8 @@ export function blockRow(v, p, i, id, avail, t) {
     .when(v.mode, (el) => el.cursor_crosshair()
       .on_mouse_down("left", (e, cx) => { cx.stop_propagation(); press(v, i, e); cx.notify(); })
       .on_mouse_move((e, cx) => { if (over(v, i, e.bounds)) cx.notify(); }))
-    .child(div().flex_1().min_w(0).py(2).child(part(p, `${id}-t`, avail - GUTTER - 2, t, !v.mode)));
+    .child(div().flex_1().min_w(0).py(2).child(part(p, `${id}-t`, avail - GUTTER - 2, t,
+      v.mode ? null : (pic) => openExpand(pic, v.artifact?.title ?? ""))));
 
   const card = (n) => {
     const sure = v.confirm === n.id;

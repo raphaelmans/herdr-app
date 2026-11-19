@@ -13,12 +13,14 @@
 //   annotations to that agent (annotate.js).
 // - library (props {library, home}): every artifact. Project (default: the project of the pane it
 //   was opened from) or All; Archived. Show in pane, open, copy path, archive, delete.
+// - expanded picture (props {expand}): one picture of an artifact in a window, to zoom (expand.js).
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, ScrollHandle, InputState, Input } from "gpui-base";
 import { agents, closeOverlay, exec, home, nextCommand, notify, panes, props, run, setShared, shared, theme, watchFolder } from "herdr";
 import * as fs from "fs/promises";
 import { build, pad, part, reanchor, sourceOf, ago, tail, tildify } from "./render.js";
+import { initExpand, openExpand, renderExpand } from "./expand.js";
 
 // A wait: one spinner, turned natively, and what is being waited for.
 const waiting = (t, label) => h_flex().gap(8).items_center().child(svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900)).child(label);
@@ -39,8 +41,15 @@ let escapeBound = false;
 
 export default class Viz extends View {
   init(_props, cx) {
-    if (!escapeBound) { cx.bind_keys([{ keystroke: "escape", action: "viz-escape", context: "VizLibrary" }]); escapeBound = true; }
+    if (!escapeBound) {
+      cx.bind_keys([
+        { keystroke: "escape", action: "viz-escape", context: "VizLibrary" },
+        { keystroke: "escape", action: "viz-escape", context: "VizExpand" },
+      ]);
+      escapeBound = true;
+    }
     const p = props() ?? {};
+    if (p.expand) return initExpand(this, p, cx);
     if (p.library) return this.initLibrary(p, cx);
     if (p.terminal) return this.initPane(p, cx);
     return this.initLauncher(p, cx);
@@ -82,10 +91,11 @@ export default class Viz extends View {
   }
 
   // The artifact's document, drawn. `parts` come from build().
-  documentView(id, parts, width, t) {
+  documentView(id, parts, width, t, title) {
     const avail = Math.max(80, width - 44);
+    const expand = (p) => openExpand(p, title);
     return v_flex().id(id).flex_1().min_h(0).overflow_y_scrollbar().px(22).py(16).text_size(13.5).text_color(t.foreground)
-      .children((parts ?? []).map((p, i) => div().pb(pad(p)).child(part(p, `${id}-${i}`, avail, t))));
+      .children((parts ?? []).map((p, i) => div().pb(pad(p)).child(part(p, `${id}-${i}`, avail, t, expand))));
   }
 
   // ---- launcher ---------------------------------------------------------------------------
@@ -411,7 +421,7 @@ export default class Viz extends View {
           .child(this.button("del", del ? "Delete for good?" : "Delete", t, (_e, cx) => this.remove(cur, cx), { danger: del })))
         .child(v_flex().flex_1().min_h(0)
           .on_size_change((size, cx) => { if (Math.abs(size.width - this.previewWidth) > 1) { this.previewWidth = size.width; cx.notify(); } })
-          .child(this.documentView(`lib-doc-${cur.id}`, this.built[builtKey(cur)], this.previewWidth, t)));
+          .child(this.documentView(`lib-doc-${cur.id}`, this.built[builtKey(cur)], this.previewWidth, t, cur.title)));
     }
 
     return v_flex().id("lib-root").size_full().bg(t.background).track_focus(this.handle).key_context("VizLibrary").on_action("viz-escape", (_e, cx) => this.keys({ key: "escape", keystroke: "escape", modifiers: {} }, cx))
@@ -423,6 +433,7 @@ export default class Viz extends View {
   render(cx) {
     if (this.role === "pane") return this.renderPane();
     if (this.role === "library") return this.renderLibrary(cx);
+    if (this.role === "expand") return renderExpand(this);
     return div();
   }
 }

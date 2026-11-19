@@ -526,9 +526,12 @@ export default class Spaces extends View {
     });
   }
 
-  // One machine's rows, each section under its header.
+  // One machine's rows, each section under its header. Hidden is always last:
+  // where its spaces sit in the space order, and any reordering, never moves it.
   sectioned(rows, t, collapsed, machine = null) {
     const sections = new Map(sectionsOf().map((s) => [s.id, s]));
+    const isHidden = (r) => Boolean(r.section && sections.get(r.section)?.hidden);
+    rows = [...rows.filter((r) => !isHidden(r)), ...rows.filter(isHidden)];
     const out = [];
     let last = null;
     for (const r of rows) {
@@ -570,9 +573,9 @@ export default class Spaces extends View {
     const at = members[0]?.i ?? 0;
     return h_flex().relative().id(`section-${s.id}`).h(24).mt(4).flex_none().px(8).gap(6).items_center().rounded(6)
       .text_size(11).text_color(t.dim).cursor_pointer().hover((el) => el.bg(t.hover))
-      .when(same(this.pressed, me) && this.over !== null && !same(this.over, me), (el) => el.opacity(0.5))
+      .when(!s.hidden && same(this.pressed, me) && this.over !== null && !same(this.over, me), (el) => el.opacity(0.5))
       .when(over && this.pressed.kind === "row", (el) => el.bg(t.selected))
-      .when(over && this.pressed.kind === "section", (el) => el.child(
+      .when(over && this.pressed.kind === "section" && !s.hidden, (el) => el.child(
         div().absolute().left(0).right(0).h(2).bg(t.accent)
           .when(from < at, (line) => line.bottom(0))
           .when(from > at, (line) => line.top(0)),
@@ -659,9 +662,10 @@ export default class Spaces extends View {
       return;
     }
     // A section: all of it goes before or after the row, or the section, it was dropped on.
+    // Hidden stays last: it isn't dragged, and nothing is placed around it.
     const moving = sections.find((s) => s.id === from.id);
     const onto = target.row ? sections.find((s) => s.id === target.section) : target.section;
-    if (!moving || onto?.id === moving.id) return;
+    if (!moving || moving.hidden || onto?.hidden || onto?.id === moving.id) return;
     const ids = membersOf(moving);
     const ends = onto ? membersOf(onto) : [target.row.id];
     if (!ids.length || !ends.length) return;
