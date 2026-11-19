@@ -11,15 +11,15 @@
 //   j k ↑ ↓      select · / search titles (esc clears) · f filter: open / all / closed
 //   J K          scroll the text a little · space / shift-space a screen · g G top / end
 //   z            read wide: hide the list (again: bring it back)
-//   e            edit the description or the page's text (cmd-enter saves, esc cancels)
-//   c            comment on the issue (cmd-enter posts) · R rename · u next priority
+//   e            edit the description or the page's text (enter saves, esc cancels)
+//   c            comment on the issue (enter posts) · R rename · u next priority
 //   s then b t a d x   set an issue's status: backlog, todo, active, done, cancelled
 //                (two keys on purpose: a stray letter typed at the window changes nothing)
 //   n            new issue (todo) or page (draft): type a title, enter creates it
 //   enter / i    hand the issue or page to the pane you came from (your send box, prefilled)
 //   y            copy the identifier · o open it in the web UI · r refresh · q esc close
 //   :            a Lific request: say what should be done, in your own words, in the
-//                box along the bottom (cmd-enter runs it, esc leaves the box).
+//                box along the bottom (enter runs it, esc leaves the box).
 //                "new issue: the export button does nothing on Safari"
 //                "mark RAISE-12 done and comment that it shipped in 2.4"
 //                It works in the project shown unless the words name another.
@@ -85,7 +85,15 @@ let escapeBound = false;
 
 export default class Lific extends View {
   init(_props, cx) {
-    if (!escapeBound) { cx.bind_keys([{ keystroke: "escape", action: "lific-escape", context: "Lific" }]); escapeBound = true; }
+    if (!escapeBound) {
+      cx.bind_keys([
+        { keystroke: "enter", action: "lific-submit-text", context: "LificText > Input" },
+        { keystroke: "secondary-enter", action: "lific-submit-text", context: "LificText > Input" },
+        { keystroke: "shift-enter", action: "lific-newline", context: "LificText > Input" },
+        { keystroke: "escape", action: "lific-escape", context: "Lific" },
+      ]);
+      escapeBound = true;
+    }
     this.bin = `${home()}/.local/bin/lific`;
     // Where you came from: its space picks the project, its pane gets "enter".
     const f = { ...(focused() ?? {}) };
@@ -128,10 +136,6 @@ export default class Lific extends View {
     this.req.on("change", (_e, cx) => { try { localStorage.setItem("request", this.req.value() ?? ""); } catch {} cx.notify(); });
     this.req.on("focus", (_e, cx) => { this.asking = true; this.picker = null; cx.notify(); });
     this.req.on("blur", (_e, cx) => { this.asking = false; cx.notify(); });
-    this.req.on("submit", (e, cx) => {
-      if (e?.secondary) this.sendRequest(cx);
-      else if (e?.shift) this.req.replace("\n");
-    });
     // Opened by the request key: straight into that box.
     const ask = shared(ASK);
     this.asked = ask?.n ?? 0;
@@ -154,16 +158,12 @@ export default class Lific extends View {
     this.search.on("submit", (_e, cx) => { this.handle.focus(); cx.notify(); });
     this.search.on("focus", (_e, cx) => { this.searching = true; cx.notify(); });
     this.search.on("blur", (_e, cx) => { this.searching = false; cx.notify(); });
-    // Multi-line: the description, a page's text, or a comment. Cmd+Enter saves.
+    // Multi-line: the description, a page's text, or a comment. Enter saves.
     this.editing = null; // "text" | "comment"
     this.area = TextareaState.new({ placeholder: "", value: "", rows: 12 });
     this.areaFocused = false;
     this.area.on("focus", (_e, cx) => { this.areaFocused = true; cx.notify(); });
     this.area.on("blur", (_e, cx) => { this.areaFocused = false; cx.notify(); });
-    this.area.on("submit", (e, cx) => {
-      if (e?.secondary) this.saveArea(cx);
-      else if (e?.shift) this.area.replace("\n");
-    });
 
     if (checking()) return; // a check draws the window; it runs no lific
     if (wanted) setShared(ACK, ask.n);
@@ -932,6 +932,9 @@ export default class Lific extends View {
     if (this.top > parts.length - 1) this.top = Math.max(0, parts.length - 1);
 
     const editor = v_flex().size_full().p(10).gap(8).bg(t.background)
+      .key_context("LificText")
+      .on_action("lific-submit-text", (_e, cx) => { cx.stop_propagation(); this.saveArea(cx); })
+      .on_action("lific-newline", (_e, cx) => { cx.stop_propagation(); this.area.replace("\n"); })
       .on_mouse_down("left", stop)
       .child(div().flex_none().text_size(11).text_color(t.muted)
         .child(this.editing === "comment" ? `Comment on ${this.editFor}` : `Editing ${this.editFor}${pages ? "" : ": description"} (markdown)`))
@@ -945,7 +948,7 @@ export default class Lific extends View {
       .child(Scrollbar.vertical("lf-body").absolute().inset_0());
 
     const actions = this.editing
-      ? [button("lf-save", this.editing === "comment" ? "Post" : "Save", "⌘↵", true, (cx) => this.saveArea(cx)),
+      ? [button("lf-save", this.editing === "comment" ? "Post" : "Save", this.areaFocused ? "↵" : "⌘↵", true, (cx) => this.saveArea(cx)),
          button("lf-cancel", "Cancel", this.areaFocused ? "esc esc" : "esc", false, (cx) => this.endEdit(cx))]
       : [button("lf-hand", "Send to pane", "↵", true, () => this.hand()),
          chip("lf-edit", "Edit", "e", (cx) => this.edit("text", cx)),
@@ -966,6 +969,7 @@ export default class Lific extends View {
       .child(h_flex().px(10).h(40).flex_none().gap(6).items_center().border_t(1).border_color(t.border)
         .children(actions)
         .child(div().flex_1())
+        .when(this.areaFocused && Boolean(this.editing), (e) => e.child(div().truncate().text_size(10.5).text_color(t.dim).child("⇧↵ new line")))
         .when(!this.editing, (e) => e.child(div().flex_none().text_size(10.5).text_color(t.dim).child("s status · J K space scroll · y copy")))
         .child(chip("lf-close", "Close", this.editing ? "" : "esc", (cx) => this.close(cx))));
 
@@ -998,11 +1002,15 @@ export default class Lific extends View {
       .when(!job && Boolean(this.said), (e) => e.child(line(div().flex_none().font_semibold().text_color(this.said.ok ? t.ansi2 : t.blocked).child(this.said.ok ? "✓" : "!"), this.said.ok ? t.muted : t.blocked, flat(this.said?.text))))
       .child(h_flex().gap(8).items_end()
         .child(div().flex_none().h(34).flex().items_center().text_size(14).font_semibold().text_color(this.asking ? t.accent : t.dim).child(":"))
-        .child(div().id("lf-req").flex_1().min_w(0).h(tall ? 92 : 34).flex().cursor_text()
+        .child(div().id("lf-req")
+          .key_context("LificText")
+          .on_action("lific-submit-text", (_e, cx) => { cx.stop_propagation(); this.sendRequest(cx); })
+          .on_action("lific-newline", (_e, cx) => { cx.stop_propagation(); this.req.replace("\n"); })
+          .flex_1().min_w(0).h(tall ? 92 : 34).flex().cursor_text()
           .child(Textarea.new(this.req).flex_1().min_h(0).px(10).py(7).rounded(8).border_1().border_color(this.asking ? t.accent : t.input).bg(t.background).text_size(13).text_color(t.foreground)))
-        .child(button("lf-run", target ? "Send" : "Start and send", "⌘↵", draft.trim().length > 0 && !job, (cx) => this.sendRequest(cx))))
+        .child(button("lf-run", target ? "Send" : "Start and send", this.asking ? "↵" : "⌘↵", draft.trim().length > 0 && !job, (cx) => this.sendRequest(cx))))
       .child(h_flex().gap(10).items_center().text_size(10.5).text_color(t.dim)
-        .child(div().flex_1().min_w(0).truncate().child(this.asking ? `⇧↵ new line · ⌘↵ send · esc leave the box · ${where}` : `: ask Lific in your own words · t open the session · ${where}`))
+        .child(div().flex_1().min_w(0).truncate().child(this.asking ? `⇧↵ new line · ↵ send · esc leave the box · ${where}` : `: ask Lific in your own words · t open the session · ${where}`))
         .child(sessionChip)
         .when(!job, (el) => el.child(chip("lf-choose", "Choose session", "T", (cx) => this.pickSession(cx))))
         .child(div().id("lf-agent").flex_none().cursor_pointer().hover((st) => st.text_color(t.foreground))

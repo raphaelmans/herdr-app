@@ -136,6 +136,7 @@ const kidStatus = (k, listed) => {
 const SORTS = [
   { id: "priority", label: "Priority", icon: "clock" },
   { id: "grouped", label: "Grouped by space", icon: "layers" },
+  { id: "machine-space", label: "Grouped by machine and space", icon: "server" },
 ];
 const sortOf = () => SORTS.find((s) => s.id === shared("agents.sort")) ?? SORTS[0];
 const SECTION = { 4: "Needs you", 3: "Done", 2: "Working", 1: "Idle", 0: "Snoozed" };
@@ -592,20 +593,19 @@ export default class Agents extends View {
           cx.stop_propagation();
           openOverlay({ mod: "agents-titled", kind: "popup", width: 200, height: menuHeight(false), props: { rowMenu: { address: a.address, asleep: this.snoozing.has(a.address) } } });
         })
-        .when(Boolean(pic), el => el.child(div().id(`agent-fold-${a.address}`)
-          .when(subs.length > 0, el => el.on_click((_e, cx) => {
-            cx.stop_propagation();
-            this.folded.has(a.address) ? this.folded.delete(a.address) : this.folded.add(a.address);
-            cx.notify();
-          })).child(pic)))
-        // The title, then a quieter line: the space mark, the tab badge and the space (an Agent row).
+        .when(Boolean(a.space_name), el => el.child(spaceMark(a)))
         .child(v_flex().flex_1().min_w(0).gap(1)
           .child(div().min_w(0).truncate().text_color(idle ? t.muted : t.foreground)
             // Pulses while its title is being written.
             .when(this.titling.has(a.address), el => el.loop("opacity", { from: 0.35, to: 1, period: 1200 }))
             .child(heading))
           .child(h_flex().min_w(0).gap(6).items_center()
-            .when(Boolean(a.space_name), el => el.child(spaceMark(a)))
+            .when(Boolean(pic), el => el.child(div().id(`agent-fold-${a.address}`)
+              .when(subs.length > 0, el => el.on_click((_e, cx) => {
+                cx.stop_propagation();
+                this.folded.has(a.address) ? this.folded.delete(a.address) : this.folded.add(a.address);
+                cx.notify();
+              })).child(pic)))
             .when(tabNo != null, el => el.child(badge))
             .child(div().flex_1().min_w(0).truncate().text_size(11).text_color(t.dim).child(a.space_name || ""))))
         .when(Boolean(machine), el => el.child(div().text_size(10).text_color(t.dim).child(machine)))
@@ -618,20 +618,34 @@ export default class Agents extends View {
     // Groups in list order: spaces (grouped) or priority sections. Agents of a
     // space are next to each other in agents(), so neighbours make a group.
     const groups = pinned.length ? [{ id: "pinned", label: "Pinned", status: null, members: pinned }] : [];
+    const byMachine = sort.id === "machine-space";
+    const machineBySpace = byMachine ? new Map(allSpaces.map(s => [s.id, s.machine])) : null;
     for (const a of rest) {
+      let sections = groups;
+      if (byMachine) {
+        const machine = machineBySpace.get(a.space);
+        const id = `machine-${machine ?? ""}`;
+        if (groups.at(-1)?.id !== id) {
+          groups.push({ id, label: machine ?? "This computer", icon: machine ? "server" : "monitor", members: [], sections: [] });
+        }
+        const parent = groups.at(-1);
+        parent.members.push(a);
+        sections = parent.sections;
+      }
       const r = this.snoozing.has(a.address) ? 0 : rankOf(a) || RANK.idle;
       const id = byPriority ? `sec-${r}` : `sp-${a.space}`;
-      if (groups.at(-1)?.id === id) groups.at(-1).members.push(a);
-      else groups.push({ id, label: byPriority ? SECTION[r] : a.space_name || "", status: byPriority ? SECTION_STATUS[r] : null, members: [a] });
+      if (sections.at(-1)?.id === id) sections.at(-1).members.push(a);
+      else sections.push({ id, label: byPriority ? SECTION[r] : a.space_name || "", status: byPriority ? SECTION_STATUS[r] : null, members: [a] });
     }
 
     // A group's header; it folds the group. Folded, it says how many and the most urgent state.
-    const header = (g) => {
+    const header = (g, nested) => {
       const open = !this.folded.has(g.id);
       const top = g.members.filter((a) => !this.snoozing.has(a.address)).reduce((m, a) => ((RANK[a.status] ?? 0) > (RANK[m] ?? 0) ? a.status : m), null);
       return h_flex()
         .id(g.id)
         .px(8)
+        .when(nested, el => el.pl(20))
         .pt(8)
         .h(30)
         .flex_none()
@@ -645,6 +659,7 @@ export default class Agents extends View {
           open ? this.folded.add(g.id) : this.folded.delete(g.id);
           cx.notify();
         })
+        .when(Boolean(g.icon), el => el.child(svg(`mods/workspace-chrome/${g.icon}.svg`).size(13).flex_none().text_color(t.muted)))
         .child(div().truncate().text_color(t[g.status] ?? t.dim).child(g.label))
         .when(byPriority || !open, (el) => el.child(div().text_color(t.dim).child(String(g.members.length))))
         .child(div().flex_1())
@@ -652,9 +667,13 @@ export default class Agents extends View {
           .when(!byPriority && top && top !== "idle", (el) => el.child(this.status(t, { status: top }, true)))
           .child(svg("mods/workspace-chrome/chevron-right.svg").size(11).flex_none().text_color(t.dim)));
     };
-    const rows = collapsed
-      ? list.flatMap(withKids)
-      : groups.flatMap((g) => [header(g), ...(this.folded.has(g.id) ? [] : g.members.flatMap(withKids))]);
+    const sectionRows = (g, nested) => {
+      const heading = header(g, nested);
+      if (this.folded.has(g.id)) return [heading];
+      const children = g.sections ? g.sections.flatMap(space => sectionRows(space, true)) : g.members.flatMap(withKids);
+      return [heading, ...children];
+    };
+    const rows = collapsed ? list.flatMap(withKids) : groups.flatMap(g => sectionRows(g, false));
 
     return v_flex()
       .size_full()
@@ -680,7 +699,7 @@ export default class Agents extends View {
                 .text_size(11)
                 .text_color(t.dim)
                 .hover((s) => s.text_color(t.foreground))
-                .on_click(() => openOverlay({ mod: "agents-titled", kind: "popup", width: 200, height: 140, props: { sortMenu: true } }))
+                .on_click(() => openOverlay({ mod: "agents-titled", kind: "popup", width: 256, height: 140, props: { sortMenu: true } }))
                 .tooltip(`Sort agents: ${sort.label}`)
                 .child(svg(`mods/workspace-chrome/${sort.icon}.svg`).size(14)),
             ),

@@ -6,6 +6,7 @@ import { agents, closeOverlay, exec, focused, hc, nextCommand, notify, openOverl
 const REPEAT_MS = 500;
 const BINDINGS = [
   ["c", "New tab…", "launcher"],
+  ["C", "New tab in universe…", "launcher", { targetSpaceName: "universe", startingFolder: "~" }],
   ["v", "Split right…", "launcher", { place: "right" }],
   ["-", "Split down…", "launcher", { place: "down" }],
   ["x", "Close pane", "pane.close"],
@@ -41,6 +42,7 @@ const BINDINGS = [
   ["g", "Lazygit", "mod.open", { name: "lazygit" }],
   ["b", "Toggle sidebar", "layout.toggle", { id: "sidebar" }],
   ["e", "Toggle Neovim", "nvim-pane.toggle"],
+  ["E", "Open Neovim zoomed", "nvim-pane.zoom"],
   ["i", "Send box", "mod.open", { name: "send-box" }],
   ["m", "Agent hub", "mod.open", { name: "agent-hub" }],
   ["L", "Lific", "mod.open", { name: "lific" }],

@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import vm from "node:vm";
 
-async function harness(place) {
+async function harness(place, extra = {}) {
   const context = vm.createContext({ console, Date });
   const requests = [], commands = [];
   let active;
@@ -23,7 +23,7 @@ async function harness(place) {
   const host = {
     checking: () => true, focused: () => ({ cwd: "/repo", space: "space" }),
     spaces: () => [{ id: "space", machine: "remote", tabs: [] }], panes: () => [],
-    appHome: () => "/config", home: () => "/home/test", props: () => ({ overlay: "launcher", place }),
+    appHome: () => "/config", home: () => "/home/test", props: () => ({ overlay: "launcher", place, ...extra }),
     shared: key => (key === "worktrunk.enabled" ? true : null),
     exec: (command, args, options) => new Promise((resolve, reject) => requests.push({ command, args, options, resolve, reject })),
     closeOverlay: id => commands.push(["close", id]), run: (...args) => commands.push(args),
@@ -178,6 +178,29 @@ test("from a worktree, the main checkout is offered right under a new branch and
   assert.equal(tab[1].folder, "/repo");
 });
 
+test("a universe worktree uses the launcher's starting folder and opens in the named space", async () => {
+  const h = await harness("tab", { targetSpaceName: "universe", startingFolder: "~" });
+  const app = await h.open();
+  app.cfg.worktree.open = "space";
+  assert.equal(app.canChooseWorktreeDestination(), false);
+  const folder = h.requests.find(r => r.args[3] === "~");
+  folder.resolve({ code: 0, stdout: "/home/test\n" });
+  await h.tick();
+  const list = h.requests.find(r => r.command === "sh" && r.args[1].includes("wt list"));
+  assert.equal(list.options.cwd, "/home/test");
+  await h.answer({ code: 0, stdout: LISTED, stderr: "" });
+  await h.type(app, "feat");
+  app.start(h.cx);
+  await h.tick();
+  const checkout = h.requests.find(r => r.command === "wt" && r.args[0] === "switch");
+  checkout.resolve({ code: 0, stdout: JSON.stringify({ path: "/wt/feat", branch: "feat" }) });
+  await h.tick();
+  assert.deepEqual(plain(h.commands), [
+    ["space.new", { machine: "remote", name: "universe", tab: "feat", folder: "/wt/feat" }],
+    ["close", "launcher"],
+  ]);
+});
+
 test("a folder that is gone says so, and a full path typed over it is read without it", async () => {
   const h = await harness();
   const app = await h.open();
@@ -195,4 +218,50 @@ test("a folder that is gone says so, and a full path typed over it is read witho
   resolve.resolve({ code: 0, stdout: "/elsewhere\n", stderr: "" });
   assert.equal(await settling, "/elsewhere");
   assert.equal(app.cwd, "/elsewhere");
+});
+
+test("a newer folder wins over a slow home lookup, including when the old lookup fails", async () => {
+  for (const failed of [false, true]) {
+    const h = await harness("tab", { startingFolder: "~" });
+    const app = await h.open();
+    const home = h.requests.find(r => r.args[3] === "~");
+    app.folder.set_value("/other");
+    const settling = app.settle(h.cx);
+    h.requests.find(r => r.args[3] === "/other").resolve({ code: 0, stdout: "/other\n" });
+    await settling;
+    if (failed) home.reject(new Error("no longer connected"));
+    else home.resolve({ code: 0, stdout: "/home/test\n" });
+    await h.tick();
+    const reads = h.requests.filter(r => r.command === "sh" && r.args[1].includes("wt list"));
+    assert.deepEqual(reads.map(r => r.options.cwd), ["/other"]);
+    assert.equal(app.cwd, "/other");
+    assert.equal(app.error, "");
+    app.folder.set_value("");
+    assert.equal(await app.settle(h.cx), null);
+    assert.equal(app.cwd, "/repo");
+  }
+});
+
+test("confirming an edited folder shows its branches before starting a worktree", async () => {
+  const h = await harness();
+  const app = await h.open();
+  await h.answer({ code: 0, stdout: LISTED, stderr: "" });
+  app.move("down", h.cx);
+  assert.equal(app.opts[app.at].branch, "main");
+  app.folder.set_value("/other");
+  app.start(h.cx);
+  await h.tick();
+  h.requests.find(r => r.args[3] === "/other").resolve({ code: 0, stdout: "/other\n" });
+  await h.tick();
+  assert.equal(app.cwd, "/other");
+  assert.equal(app.busy, false);
+  assert.equal(h.commands.length, 0);
+  assert.equal(h.requests.some(r => r.command === "wt" && r.args[0] === "switch"), false);
+  await h.answer({ code: 0, stdout: JSON.stringify([["trunk", "/other", true, true]]), stderr: "" });
+  app.move("down", h.cx);
+  app.start(h.cx);
+  await h.tick();
+  const checkout = h.requests.find(r => r.command === "wt" && r.args[0] === "switch");
+  assert.equal(checkout.options.cwd, "/other");
+  assert.equal(checkout.args.at(-1), "trunk");
 });

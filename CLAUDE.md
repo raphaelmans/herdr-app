@@ -23,11 +23,11 @@ Don't read `MAINTENANCE.md`, and don't start any of its passes, unless the perso
 
 - **Vim motions:** `j`/`k` down and up, `h`/`l` across, `g`/`G` first and last, `/` to search a long list, alongside arrows, and shown in the footer hints. While a text field has the keyboard, letters are typed.
 - **Escape steps back:** it leaves the focused component stepped into last (field, search, opened item) and keeps what was typed. Only with nothing left to leave does it close the window. Herdr closes a dialog on Escape before `on_key_down` runs while an `Input`/`Textarea` has the keyboard, so bind Escape with `cx.bind_keys` + `.key_context(...).on_action(...)`. Never discard a draft in one press.
-- **Text boxes** (first message, send box, comments, annotations) submit only with Cmd+Enter; Enter and Shift+Enter add a new line. Build them on `TextareaState`; hint "⇧↵ new line · ⌘↵ <verb>". Short fields and searches keep plain Enter.
-- **Explicit start:** picking an item by number or key selects it; creating a tab, split or space takes Cmd+Enter, never a single digit.
+- **Text boxes** (first message, send box, comments, annotations) submit with Enter or Cmd+Enter. Shift+Enter inserts one new line. Build them on `TextareaState` and show "⇧↵ new line · ↵ <verb>". Short fields and searches keep plain Enter.
+- **Explicit start.** Number and navigation keys select a program. Enter or Cmd+Enter starts it in Launcher. In Go to, Enter opens a matching tab and Cmd+Enter confirms a selected new tab or space.
 - **Agent pickers** list Herdr's `knownAgents()` narrowed by the agent shortlist, never a hard-coded list (ADR 0002). Reuse `shortlisted()` / `offered()` from `mods/launcher/main.js` and `mods/config/writer.js`.
 - **Model pickers** offer the model catalog (`models.json`), starred models first; a model not in it can still be typed.
-- **Agent order** comes from the Agents sidebar (`setAgentOrder`); the Agent hub and next/previous follow it. Agent rows: title on line one; space mark, tab badge and space, quieter, on line two. Show a program's logo, not its name.
+- **Agent order** comes from the Agents sidebar (`setAgentOrder`). The Agent hub and next/previous follow it. Put the title first and the tab and space on a quieter second line. In the sidebar, place the space mark beside both lines and the program logo on the second line.
 - **Agnostic of agent and provider:** messages, pulls, forks, titles and the pane's model label must work for any agent CLI, not only Claude Code.
 - **Choices go in Config** (ADR 0001): a new setting is a page in `mods/config/`, never a dialog or tab-bar button of its own.
 - **Writer:** any mod that needs a short generated text (branch name, tab title) asks the Writer, configured on Config → Writer.
@@ -36,7 +36,7 @@ Don't read `MAINTENANCE.md`, and don't start any of its passes, unless the perso
 - **Heavy data** is reduced with `exec` (curl, jq, bounded git output) before a mod reads it (ADR 0006).
 - **Git** is the lazygit program in a popup (`mods/lazygit`, Cmd-G), not an own mod (ADR 0011).
 - **Reads** are lazy, kept per key in a bounded map, reused until a mark or age says they changed, read once per key at a time, and read only for a selection that has settled (150–200 ms); an overtaken read is dropped (ADR 0009). Derived data is worked out once per list, never per redraw.
-- **Typing pause:** searches and suggestions run after a pause sized to their cost (80 ms local, 1000 ms Find a file), keep the old results on screen, and run at once on Enter. A long list of choices is a combo box (ADR 0010).
+- **Typing pause.** Keep the current results while waiting for typing to pause (80 ms for local filtering, 1000 ms for a large file index). Run the search immediately on Enter. A long list of choices is a combo box (ADR 0010).
 
 ## Kinds of mods
 

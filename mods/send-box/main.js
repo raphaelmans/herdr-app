@@ -1,5 +1,4 @@
-// Send box: a floating, non-blocking window with a text area. Send (Cmd+Enter only;
-// Enter and Shift+Enter add a new line)
+// Send box: a floating, non-blocking window with a text area. Send (Enter or Cmd+Enter)
 // pastes the text into the terminal that had focus when it opened and presses
 // Enter (`hc send`), then puts the keyboard back on that pane. Esc cancels.
 // Drag it by any spot that isn't the text area or a button.
@@ -81,7 +80,15 @@ let escapeBound = false;
 
 export default class SendBox extends View {
   init(_props, cx) {
-    if (!escapeBound) { cx.bind_keys([{ keystroke: "escape", action: "send-box-escape", context: "SendBox" }]); escapeBound = true; }
+    if (!escapeBound) {
+      cx.bind_keys([
+        { keystroke: "enter", action: "send-box-submit-text", context: "SendBoxText > Input" },
+        { keystroke: "secondary-enter", action: "send-box-submit-text", context: "SendBoxText > Input" },
+        { keystroke: "shift-enter", action: "send-box-newline", context: "SendBoxText > Input" },
+        { keystroke: "escape", action: "send-box-escape", context: "SendBox" },
+      ]);
+      escapeBound = true;
+    }
     const p = props() ?? {};
     this.isWindow = Boolean(p.window);
     if (!this.isWindow) return this.initLauncher();
@@ -95,17 +102,10 @@ export default class SendBox extends View {
     this.hub = p.hub ?? null;
     this.back = p.back ?? null;
     this.rows = 4; // until the frame is measured; fits the smallest window
-    this.area = TextareaState.new({ placeholder: "Type a message…  (Enter for a new line, Cmd+Enter to send)", value: this.text, rows: this.rows });
+    this.area = TextareaState.new({ placeholder: "Type a message…  (Enter to send, Shift+Enter for a new line)", value: this.text, rows: this.rows });
     // Start after any supplied text, including pulled output, ready to append.
     this.area.set_selected_range({ start: this.text.length, end: this.text.length });
     this.area.on("change", (_e, cx) => { this.text = this.area.value(); cx.notify(); });
-    // Only Cmd+Enter sends. The text area reports Enter as "submit" (with the
-    // modifiers held): plain Enter already adds its new line; Shift+Enter
-    // doesn't, so it gets one here.
-    this.area.on("submit", (e) => {
-      if (e?.secondary) this.send();
-      else if (e?.shift) this.newline();
-    });
     // Whether the text area has the keyboard: Escape steps back out of it first.
     this.typing = false;
     this.left = false;
@@ -171,15 +171,6 @@ export default class SendBox extends View {
     if (!sent) run("agent-hub.focus");
   }
 
-  // One new line at the cursor (once, if both the text area and the key
-  // handler see the same Shift+Enter).
-  newline() {
-    const now = Date.now();
-    if (now - (this.lastNewline ?? 0) < 60) return;
-    this.lastNewline = now;
-    this.area.replace("\n");
-  }
-
   send() {
     if (this.sent) return;
     const typed = this.area.value();
@@ -220,15 +211,18 @@ export default class SendBox extends View {
       })
       .on_key_down((e, cx) => {
         if (e.keystroke === "cmd-enter") { this.send(); cx.stop_propagation(); }
-        else if (this.typing) { if (e.keystroke === "shift-enter") { this.newline(); cx.stop_propagation(); } }
-        else if (e.key === "enter" || e.key === "tab" || e.key_char === "i") { this.area.focus(); cx.stop_propagation(); cx.notify(); }
+        else if (!this.typing && (e.key === "enter" || e.key === "tab" || e.key_char === "i")) { this.area.focus(); cx.stop_propagation(); cx.notify(); }
       })
       .size_full().p(18).gap(10).rounded(10).border_1().border_color(t.border).bg(t.popover).cursor_move().text_color(t.foreground)
       .child(h_flex().items_center()
         .child(div().flex_1().text_size(15).font_semibold().child("Send box"))
-        .child(div().text_size(11).text_color(t.dim).child(this.typing ? "drag to move · esc leave field" : "i type · esc close")))
+        .child(div().text_size(11).text_color(t.dim).child(this.typing ? "⇧↵ new line · ↵ send · esc leave field" : "i type · esc close")))
       .child(div().text_size(11.5).text_color(t.dim).child(this.terminal ? `To: ${this.label}${this.wrap?.from ? `  ·  From: ${this.wrap.from} (replies go back there)` : ""}` : "No terminal had focus. Close this, click a terminal, and try again."))
-      .child(div().id("sb-area").flex_1().min_h(0).flex().cursor_text()
+      .child(div().id("sb-area")
+        .key_context("SendBoxText")
+        .on_action("send-box-submit-text", (_e, cx) => { cx.stop_propagation(); this.send(); })
+        .on_action("send-box-newline", (_e, cx) => { cx.stop_propagation(); this.area.replace("\n"); })
+        .flex_1().min_h(0).flex().cursor_text()
         // The text area scrolls past the rows it was told it shows, not past
         // its frame: keep that count at what fits, or the last lines are cut off.
         .on_size_change((size) => {
@@ -239,6 +233,6 @@ export default class SendBox extends View {
         .child(Textarea.new(this.area).flex_1().min_h(0).p(AREA_PAD).rounded(9).border_1().border_color(this.typing ? t.accent : t.input).bg(t.background).text_size(13).text_color(t.foreground)))
       .child(h_flex().gap(8).justify_end()
         .child(button("sb-cancel", "Cancel", false, () => this.dismiss()))
-        .child(button("sb-send", "Send  ⌘↵", true, () => this.send(), canSend)));
+        .child(button("sb-send", this.typing ? "Send  ↵" : "Send  ⌘↵", true, () => this.send(), canSend)));
   }
 }

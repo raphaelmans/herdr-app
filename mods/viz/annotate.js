@@ -55,23 +55,8 @@ export function initNotes(v, cx) {
   v.handle = cx.focus_handle();
   v.area = TextareaState.new({ placeholder: "Add context", rows: 2 });
   v.area.set_auto_grow(2, 10);
-  // A text box: Enter (which has already added its new line) and Shift+Enter are new lines;
-  // Cmd+Enter saves. Out of the box, Cmd+Enter sends.
-  v.area.on("submit", (e, cx) => {
-    if (e?.secondary) save(v);
-    else if (e?.shift) newline(v);
-    cx.notify();
-  });
   v.area.on("focus", (_e, cx) => { v.typing = true; cx.notify(); });
   v.area.on("blur", (_e, cx) => { v.typing = false; cx.notify(); });
-}
-
-// Once, if both the text area and the key handler see the same Shift+Enter.
-function newline(v) {
-  const now = Date.now();
-  if (now - (v.lastNewline ?? 0) < 60) return;
-  v.lastNewline = now;
-  v.area.replace("\n");
 }
 
 // Open the comment box on blocks from..to: for a new annotation, or to edit `note`.
@@ -279,7 +264,6 @@ export function keys(v, e, cx) {
   const done = () => { cx.stop_propagation(); cx.notify(); };
   if (v.typing) {
     if (e.keystroke === "escape") { v.typing = false; v.handle.focus(); done(); }
-    else if (e.keystroke === "shift-enter") { newline(v); done(); }
     return;
   }
   if (e.keystroke === "cmd-enter") { send(v, cx); return done(); }
@@ -408,14 +392,18 @@ export function blockRow(v, p, i, id, avail, t) {
       })));
   };
 
-  const box = () => v_flex().id("note-box").ml(GUTTER + 2).mt(4).max_w(460).p(10).gap(6).rounded(14)
+  const box = () => v_flex().id("note-box")
+    .key_context("VizComment")
+    .on_action("viz-submit-text", (_e, cx) => { cx.stop_propagation(); save(v); cx.notify(); })
+    .on_action("viz-newline", (_e, cx) => { cx.stop_propagation(); v.area.replace("\n"); })
+    .ml(GUTTER + 2).mt(4).max_w(460).p(10).gap(6).rounded(14)
     .border_1().border_color(v.typing ? t.accent : t.input).bg(t.popover)
     .on_mouse_down("left", stop)
     .child(div().text_size(10.5).text_color(t.dim).child(`${c.id ? "Edit the comment" : "Comment"} on ${the(v.parts, c.from, c.to)}`))
     .child(Textarea.new(v.area).w_full().text_size(12.5).text_color(t.foreground))
     .child(h_flex().gap(6).items_center()
       .child(div().flex_1().min_w(0).truncate().text_size(10.5).text_color(t.dim)
-        .child(v.typing ? "⌘↵ save · ⇧↵ new line · esc leave field" : "i type · esc close"))
+        .child(v.typing ? "↵ save · ⇧↵ new line · esc leave field" : "i type · esc close"))
       .child(v.button("note-cancel", "Cancel", t, (_e, cx) => { closeBox(v); cx.notify(); }))
       .child(v.button("note-save", "Comment", t, (_e, cx) => { save(v); cx.notify(); }, { primary: true })));
 

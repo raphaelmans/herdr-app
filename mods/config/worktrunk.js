@@ -159,10 +159,7 @@ export default class Worktrunk {
   field(input, path, multi = false) {
     const field = { input, path };
     input.on("change", () => { if (field.focused) field.typed = input.value(); });
-    // A text box (multi-line): Enter and Shift+Enter add a new line, Cmd+Enter leaves it (and saves).
-    // A one-line field: Enter leaves it.
-    input.on("submit", (e, cx) => {
-      if (multi && !e?.secondary) { if (e?.shift) input.replace("\n"); return; }
+    if (!multi) input.on("submit", (_e, cx) => {
       this.host.handle.focus(); cx.notify();
     });
     input.on("focus", (_e, cx) => { this.typing = true; field.focused = true; field.typed = undefined; cx.notify(); });
@@ -180,6 +177,7 @@ export default class Worktrunk {
   }
 
   get hints() {
+    if (this.guidance.focused) return "⇧↵ new line · ↵ save";
     return this.enabled === false ? "m open Mods · r reread"
       : "j k g G move · space switch, or the next choice · ↵ type · e edit the file · r reread · saved as you change it";
   }
@@ -384,7 +382,11 @@ export default class Worktrunk {
     const input = row.area ? Textarea.new(row.field.input) : Input.new(row.field.input);
     return shell(h_flex().gap(10).when(!row.area, (el) => el.items_center()).when(Boolean(row.area), (el) => el.items_start())
       .child(row.area ? label.pt(6) : label)
-      .child(div().id(`wt-${row.id}-box`).flex_1().min_w(0).px(10).rounded(8).border_1().border_color(focused ? t.accent : t.border).bg(t.surface).cursor_text()
+      .child(div().id(`wt-${row.id}-box`)
+        .when(Boolean(row.area), (el) => el.key_context("WorktrunkGuidance")
+          .on_action("config-submit-text", (_e, cx) => { cx.stop_propagation(); this.host.handle.focus(); cx.notify(); })
+          .on_action("config-newline", (_e, cx) => { cx.stop_propagation(); row.field.input.replace("\n"); }))
+        .flex_1().min_w(0).px(10).rounded(8).border_1().border_color(focused ? t.accent : t.border).bg(t.surface).cursor_text()
         .when(!row.area, (el) => el.h(30).flex().items_center()).when(Boolean(row.area), (el) => el.py(6))
         .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
         .child(input.w_full().text_size(12).text_color(t.foreground).when(!row.area, (el) => el.h_full()))))

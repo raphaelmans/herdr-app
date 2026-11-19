@@ -59,7 +59,6 @@
     "ctrl-9": "space.select:9",
     "ctrl-a": "mod.open:tmux-prefix",
     "cmd-e": "nvim-pane.toggle",
-    "cmd-o": "mod.open:file-picker",
     "cmd-shift-e": "nvim-pane.show",
     "cmd-alt-t": "mod.open:auto-title",
     "cmd-i": "mod.open:send-box",

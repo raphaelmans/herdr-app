@@ -43,6 +43,9 @@ export default class Viz extends View {
   init(_props, cx) {
     if (!escapeBound) {
       cx.bind_keys([
+        { keystroke: "enter", action: "viz-submit-text", context: "VizComment > Input" },
+        { keystroke: "secondary-enter", action: "viz-submit-text", context: "VizComment > Input" },
+        { keystroke: "shift-enter", action: "viz-newline", context: "VizComment > Input" },
         { keystroke: "escape", action: "viz-escape", context: "VizLibrary" },
         { keystroke: "escape", action: "viz-escape", context: "VizExpand" },
       ]);

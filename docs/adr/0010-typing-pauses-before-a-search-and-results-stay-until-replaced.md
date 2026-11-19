@@ -8,7 +8,7 @@ The pause depends on what each keystroke costs:
 |---|---|---|
 | Suggestions read from a small, local source | 80 ms | Launcher folder field, worktree combo box |
 | A selection whose detail costs a process | 150–200 ms settle (ADR 0009) | Pull requests, Jira |
-| Search over a large index | 1000 ms, the person's choice | Find a file (`SEARCH_PAUSE`) |
+| Search over a large index | 1000 ms, the person's choice | The former Find a file picker |
 
 Whatever the pause:
 

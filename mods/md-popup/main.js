@@ -1,4 +1,4 @@
-// Markdown preview pane from Cmd+O, or popup opened from nvim with <leader>mp
+// Markdown preview pane or popup opened from nvim with <leader>mp
 // (~/.config/nvim/lua/plugins/md-preview-herdr.lua).
 //
 // nvim writes the file's path to mods/md-popup/.file (hidden, so writing it

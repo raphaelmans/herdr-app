@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import vm from "node:vm";
 
-async function harness(extra = {}) {
+async function harness(extra = {}, spaces = [{ id: "space", machine: "remote" }]) {
   const context = vm.createContext({ console });
   const jobs = [], requests = [], commands = [], bindings = [];
   let checking = true, app, active;
@@ -22,7 +22,7 @@ async function harness(extra = {}) {
   }) };
   const host = {
     checking: () => checking, focused: () => ({ cwd: "/repo", space: "space" }),
-    spaces: () => [{ id: "space", machine: "remote" }], panes: () => [],
+    spaces: () => spaces, panes: () => [],
     appHome: () => "/config", home: () => "/home/test", shared: () => null, props: () => ({ overlay: "launcher", ...extra }),
     exec: (command, args, options) => new Promise(resolve => requests.push({ command, args, options, resolve })),
     closeOverlay: id => commands.push(["close", id]), run: (...args) => commands.push(args),
@@ -51,7 +51,7 @@ async function harness(extra = {}) {
   const key = key => app.key({ key, modifiers: {} }, cx);
   const reply = async (request, stdout) => { request.resolve({ code: 0, stdout, stderr: "" }); await tick(); };
   app.folder.focus(); await tick();
-  return { app, requests, commands, bindings, type, key, reply, tick, flush: () => Promise.all(jobs) };
+  return { app, cx, requests, commands, bindings, type, key, reply, tick, flush: () => Promise.all(jobs) };
 }
 
 test("a late directory result cannot replace newer text or reopen dismissed suggestions", async () => {
@@ -106,4 +106,44 @@ test("a split starts in its edited folder, and in the tab's folder when untouche
   const direct = plain.commands.find(c => c[0] === "pane.split");
   assert.equal(direct[1].direction, "down");
   assert.equal(direct[1].argv, undefined);
+});
+
+test("the first universe launch creates the space with the chosen program in its first tab", async () => {
+  const h = await harness({ targetSpaceName: "universe", startingFolder: "~" }, [
+    { id: "space", machine: "remote" },
+    { id: "local-universe", name: "universe", named: true, machine: null },
+    { id: "remote/automatic", name: "universe", named: false, machine: "remote" },
+  ]);
+  assert.equal(h.app.folder.value(), "~");
+  h.app.agents = [{ key: "codex", name: "Codex", run: ["codex"], installed: true }];
+  h.app.picked = "codex";
+  h.app.message.set_value("Review the changes");
+  h.app.start(h.cx);
+  await h.tick();
+  assert.equal(h.commands.length, 0);
+  const resolve = h.requests.at(-1);
+  assert.equal(resolve.args[3], "~");
+  assert.equal(resolve.options.on, "remote");
+  await h.reply(resolve, "/home/test\n");
+  assert.deepEqual(JSON.parse(JSON.stringify(h.commands)), [
+    ["space.new", { machine: "remote", name: "universe", tab: "Codex", argv: ["codex"], task: "Review the changes", folder: "/home/test" }],
+    ["close", "launcher"],
+  ]);
+});
+
+test("a universe launch reuses the space present at submit and passes the edited path explicitly", async () => {
+  const spaces = [{ id: "space", machine: "remote" }];
+  const h = await harness({ targetSpaceName: "universe", startingFolder: "~" }, spaces);
+  spaces.push({ id: "remote/automatic", name: "universe", named: false, machine: "remote" });
+  spaces.push({ id: "remote/universe", name: "universe", named: true, machine: "remote" });
+  h.app.folder.set_value("/repo"); // Same as the source pane, different from the destination's folder.
+  h.app.start(h.cx);
+  await h.tick();
+  const resolve = h.requests.at(-1);
+  assert.equal(resolve.args[3], "/repo");
+  await h.reply(resolve, "/repo\n");
+  assert.deepEqual(JSON.parse(JSON.stringify(h.commands)), [
+    ["tab.new", { space: "remote/universe", folder: "/repo" }],
+    ["close", "launcher"],
+  ]);
 });

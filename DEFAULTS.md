@@ -61,7 +61,7 @@ These live in `shared.json`, which git does not hold. "Absent" means the key is 
 | Sections | `spaces.sections` | no named sections; an empty Hidden section per machine | the spaces sidebar |
 | Space colors | `space.colors` | none (same reason) | the spaces sidebar |
 | Files and Changes panels | `workspace.panels` | `[]` (both closed; absent: both offered) | the tab bar |
-| Agents sidebar order | `agents.sort` | absent (`priority`) | the Agents sidebar's menu |
+| Agents sidebar order | `agents.sort` | absent (`priority`) | the Agents sidebar's menu offers Priority, Grouped by space, and Grouped by machine and space |
 
 The Config page is the safe way to change one: it also updates what depends on it (the Writer's command, worktrunk's own file).
 

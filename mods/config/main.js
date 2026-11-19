@@ -67,7 +67,15 @@ let escapeBound = false;
 
 export default class Config extends View {
   init(_props, cx) {
-    if (!escapeBound) { cx.bind_keys([{ keystroke: "escape", action: "config-escape", context: "ConfigDialog" }]); escapeBound = true; }
+    if (!escapeBound) {
+      cx.bind_keys([
+        { keystroke: "enter", action: "config-submit-text", context: "WorktrunkGuidance > Input" },
+        { keystroke: "secondary-enter", action: "config-submit-text", context: "WorktrunkGuidance > Input" },
+        { keystroke: "shift-enter", action: "config-newline", context: "WorktrunkGuidance > Input" },
+        { keystroke: "escape", action: "config-escape", context: "ConfigDialog" },
+      ]);
+      escapeBound = true;
+    }
     this.role = props()?.role ?? "panel";
     if (this.role === "toggle") {
       cx.spawn(async (cx) => { try { const agents = await knownAgents(); settle(agents); settleLific(agents); } catch {} follow(cx); });

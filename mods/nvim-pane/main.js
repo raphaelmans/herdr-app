@@ -3,6 +3,8 @@
 //   cmd-e        nvim-pane.toggle   show it, or hide it (nvim keeps running)
 //   cmd-shift-e  nvim-pane.show     show it and give it the keyboard
 //
+//   ctrl-a E     nvim-pane.zoom     open it zoomed
+//
 // - The first time in a tab: one `hc run` starts nvim in the focused pane's
 //   folder, labelled with the tab, then `terminal.keep` gives it a pane.
 // - Hiding is `terminal.park`: the pane goes, nvim and its buffers stay.
@@ -30,7 +32,14 @@ function nvimOf(tab) {
   return terminals().find((t) => t.state === "live" && t.labels?.[LABEL] === tab)?.address ?? null;
 }
 
-const isShown = (terminal) => panes().some((p) => p.terminal === terminal);
+const paneOf = (terminal) => panes().find((p) => p.terminal === terminal);
+
+function showPane(pane, zoom) {
+  run("pane.focus", { pane: pane.pane });
+  if (zoom && !pane.zoomed && panes().some(p => p.tab === pane.tab && p.pane !== pane.pane)) {
+    run("pane.zoom", { pane: pane.pane });
+  }
+}
 
 export default class NvimPane extends View {
   init(_props, cx) {
@@ -47,8 +56,7 @@ export default class NvimPane extends View {
         }
         this.busy = true;
         try {
-          if (command === "toggle") await this.open(f, cx, true);
-          else if (command === "show") await this.open(f, cx, false);
+          if (["toggle", "show", "zoom"].includes(command)) await this.open(f, cx, command);
         } catch (e) {
           notify({ title: "nvim", body: String(e?.message ?? e), level: "error" });
         } finally {
@@ -59,12 +67,14 @@ export default class NvimPane extends View {
   }
 
   // The tab's nvim in a pane with the keyboard, started if there is none.
-  // `toggle`: one that shows is hidden instead. True once nvim shows.
-  async open(f, cx, toggle) {
+  // Toggle hides a visible pane. Zoom always leaves the editor enlarged.
+  async open(f, cx, command) {
     let terminal = nvimOf(f.tab);
-    if (terminal && isShown(terminal)) {
-      run(toggle ? "terminal.park" : "pane.focus", { terminal });
-      return !toggle;
+    const pane = terminal && paneOf(terminal);
+    if (pane) {
+      if (command === "toggle") run("terminal.park", { terminal });
+      else showPane(pane, command === "zoom");
+      return;
     }
     if (!terminal) {
       const space = spaces().find((s) => s.id === f.space);
@@ -91,7 +101,21 @@ export default class NvimPane extends View {
     // another by now, nvim stays parked for that tab's next key.
     if (focused()?.tab !== f.tab) return false;
     run("terminal.keep", { terminal, place: PLACE });
-    return true;
+    if (command !== "zoom") return;
+    // Keep may acknowledge before the pane appears in the tab.
+    const deadline = Date.now() + 5000;
+    while (focused()?.tab === f.tab) {
+      const kept = paneOf(terminal);
+      if (kept) {
+        showPane(kept, true);
+        return;
+      }
+      if (Date.now() >= deadline) {
+        notify({ title: "Could not zoom Neovim", body: "The editor pane has not appeared.", level: "warning" });
+        return;
+      }
+      await cx.sleep(25);
+    }
   }
 
   // A local tab that was here at the last render and is gone now: its nvim

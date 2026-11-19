@@ -91,7 +91,7 @@ What Escape does in every mod: it leaves the focused component you stepped into 
 _Avoid_: cancel, dismiss, close (for Escape in general)
 
 **Text box**:
-A field for writing text that is sent or saved, longer than a name or a search: a first message, a message in the send box, a comment, an annotation. Enter and Shift+Enter start a new line in it; only Cmd+Enter sends or saves. A short field (a name, a branch, a search) keeps Enter.
+A field for writing text that is sent or saved, longer than a name or a search: a first message, a message in the send box, a comment, an annotation. Enter sends or saves the text. Cmd+Enter does the same. Shift+Enter inserts one new line at the cursor. A short field (a name, a branch, a search) keeps Enter.
 _Avoid_: textarea, input, prompt (Herdr's naming dialog), editor
 
 ### Waiting and reading
@@ -223,7 +223,7 @@ The one order agents are listed in, wherever they are listed: pinned agents firs
 _Avoid_: sort (that is the choice behind the order), ranking, priority
 
 **Agent row**:
-One agent in a list of agents: its title on the first line, and under it, quieter, its space mark, its tab badge and its space.
+One agent in a list, with its title on the first line and its tab and space on a quieter second line. In the Agents sidebar the space mark sits beside both lines. In the Agent hub it sits on the second line.
 _Avoid_: entry, item, card
 
 **Snoozed**:

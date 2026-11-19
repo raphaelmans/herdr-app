@@ -3,7 +3,7 @@
 // other quiet spaces (no agent running) fold into "earlier". Last rows: new work (a tab here, a space on this
 // computer or on each connected machine).
 //
-// Keys follow Find a file (Cmd+O): it opens in NORMAL, where j/k g/G move,
+// Go to opens in INSERT for immediate search. In NORMAL, j/k and g/G move,
 // l or Enter goes, / or i searches, ? shows the keys and q closes. While
 // searching (INSERT) letters are typed and arrows or Ctrl+J/K/N/P move.
 // Escape steps back: help, then search (keeping what was typed), then close.
@@ -11,7 +11,7 @@
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { agents, spaces, terminals, run, hc, theme, settings, props, closeOverlay, shared, setShared } from "herdr";
+import { agents, spaces, terminals, run, hc, theme, settings, props, closeOverlay, shared, setShared, checking } from "herdr";
 
 const MARK = { ansi6: "#22a99a", ansi3: "#e3814f", ansi4: "#5b8def", ansi5: "#8b7cf6", ansi2: "#3fae6a", ansi1: "#d9649a" };
 
@@ -42,11 +42,17 @@ function spaceColor(t, p) {
 // Escape must be an action: Herdr's own Escape otherwise closes the popup
 // before the search field can be left.
 let keysBound = false;
+const LIST_KEYS = {
+  down: "next", "ctrl-n": "next", "ctrl-j": "next",
+  up: "previous", "ctrl-p": "previous", "ctrl-k": "previous",
+  pageup: "page-up", pagedown: "page-down", "ctrl-d": "close-tab",
+};
 const HELP = [
   "Esc: leave search → close",
   "j / k: down / up     g / G: first / last",
   "Page Down / Page Up: a page at a time",
   "l / Enter: go     / or i: search",
+  "Cmd+Enter: create the selected new tab or space",
   "Ctrl+J / Ctrl+K or Ctrl+N / Ctrl+P: move while searching",
   "Ctrl+D: close the selected tab",
   "q: close     ?: help     Esc / q: leave help",
@@ -57,31 +63,32 @@ export default class Picker extends View {
     if (!keysBound) {
       cx.bind_keys([
         { keystroke: "escape", action: "go-to-escape", context: "GoTo" },
-        ...["n", "j", "p", "k"].map((key) => ({ keystroke: `ctrl-${key}`, action: `go-to-ctrl-${key}`, context: "GoTo" })),
+        { keystroke: "secondary-enter", action: "go-to-confirm", context: "GoTo" },
+        ...Object.entries(LIST_KEYS).map(([keystroke, action]) => ({ keystroke, action: `go-to-${action}`, context: "GoTo > Input" })),
       ]);
       keysBound = true;
     }
-    this.typing = false;
+    this.typing = true;
     this.help = false;
     this.pageRows = 10;
     this.filter = "";
     this.input = InputState.new({ placeholder: "Go to a tab, space or agent…" });
     this.input.on("change", (_e, cx) => {
       this.filter = this.input.value();
-      this.at = this.filter ? Math.max(0, this.rows().filter(r => r.kind !== "head").findIndex(r => r.kind === "ctx")) : 0;
+      this.at = this.filter ? this.pickable().findIndex(r => r.kind === "ctx") : 0;
       cx.notify();
     });
-    this.input.on("submit", (_e, cx) => this.go(this.rows().filter(r => r.kind !== "head")[this.at], cx));
+    this.input.on("submit", (e, cx) => this.go(this.pickable()[this.at], cx, e?.secondary));
     this.input.on("focus", (_e, cx) => { this.typing = true; cx.notify(); });
-    this.input.on("blur", (_e, cx) => { this.typing = false; cx.notify(); });
     this.at = null;
     this.scroll = 0;
     this.showEarlier = false;
     this.machines = [];
     this.handle = cx.focus_handle();
     // The popup takes the keyboard a moment after it opens; claim it again.
-    this.handle.focus();
-    for (const ms of [100, 600]) cx.timer.after(ms, () => { if (!this.typing) this.handle.focus(); });
+    this.input.focus();
+    if (checking()) return;
+    for (const ms of [100, 600]) cx.timer.after(ms, () => this.refocus());
     cx.spawn(async (cx) => {
       try {
         const r = await hc(["machine", "ls", "--json"]);
@@ -92,6 +99,7 @@ export default class Picker extends View {
   }
 
   close() {
+    this.closed = true;
     closeOverlay(props().overlay);
   }
 
@@ -101,6 +109,7 @@ export default class Picker extends View {
 
   // Keep the keyboard where it was: the search field while typing, the list otherwise.
   refocus() {
+    if (this.closed) return;
     if (this.typing) this.input.focus();
     else this.handle.focus();
   }
@@ -123,9 +132,15 @@ export default class Picker extends View {
     cx.notify();
   }
 
-  control(key, cx) {
+  listKey(action, cx) {
     if (this.help) return;
-    this.move((this.at ?? 0) + { n: 1, j: 1, p: -1, k: -1 }[key], cx);
+    if (action === "close-tab") {
+      const sel = this.pickable()[this.at];
+      if (sel?.kind === "ctx") { this.close(); run("tab.close", { id: sel.ctx.id }); }
+    } else {
+      const step = { next: 1, previous: -1, "page-up": -this.pageRows, "page-down": this.pageRows }[action];
+      this.move((this.at ?? 0) + step, cx);
+    }
     cx.stop_propagation();
   }
 
@@ -139,16 +154,10 @@ export default class Picker extends View {
       cx.stop_propagation(); return;
     }
     const at = this.at ?? 0;
-    if (m.control) {
-      if (key !== "d") return; // Scoped actions handle the rest, including in the search field.
-      const sel = this.pickable()[at];
-      if (sel?.kind === "ctx") { this.close(); run("tab.close", { id: sel.ctx.id }); }
-      cx.stop_propagation(); return;
-    }
     // Printable keys belong to the search field while typing; j/k never eat a search.
-    if (this.typing) {
-      const step = { down: 1, up: -1, pagedown: this.pageRows, pageup: -this.pageRows }[key];
-      if (step !== undefined) { this.move(at + step, cx); cx.stop_propagation(); }
+    if (m.control || this.typing) {
+      const action = LIST_KEYS[m.control ? `ctrl-${key}` : key];
+      if (action) this.listKey(action, cx);
       return;
     }
     if (ch === "j" || key === "down") this.move(at + 1, cx);
@@ -211,8 +220,9 @@ export default class Picker extends View {
     return out;
   }
 
-  go(r, cx) {
-    if (!r) return;
+  go(r, cx, confirmCreate = false) {
+    if (!r || this.closed || this.help) return;
+    if ((r.kind === "new" || r.kind === "space") && !confirmCreate) return;
     if (r.kind === "earlier") {
       this.at = this.rows().filter(r => r.kind !== "head").findIndex(r => r.kind === "earlier");
       this.showEarlier = !this.showEarlier;
@@ -239,6 +249,7 @@ export default class Picker extends View {
     if (this.at === null) this.at = Math.max(0, pickable.findIndex((r) => r.kind === "ctx" && r.w.active && r.ctx.active));
     this.at = Math.min(this.at, pickable.length - 1);
     const sel = pickable[this.at];
+    const enterHint = sel?.kind === "new" || sel?.kind === "space" ? "⌘↵ create" : this.typing ? "Enter go" : "Enter/l go";
     const tabs = pickable.filter((r) => r.kind === "ctx").length;
     // One continuous strip: each row (and the group title before it) at a fixed
     // y. Scrolling moves the strip only as far as it takes to keep the selected
@@ -313,7 +324,7 @@ export default class Picker extends View {
           .cursor_pointer()
           .when(on, (el) => el.bg(t.hover))
           .hover((s) => s.bg(t.hover))
-          .on_click(() => this.go(r))
+          .on_click((_e, cx) => this.go(r, cx, true))
           .child(div().w(12).child("+"))
           .child(label);
       }
@@ -343,10 +354,12 @@ export default class Picker extends View {
       .track_focus(this.handle)
       .key_context("GoTo")
       .on_action("go-to-escape", (_e, cx) => this.escape(cx))
-      .on_action("go-to-ctrl-n", (_e, cx) => this.control("n", cx))
-      .on_action("go-to-ctrl-j", (_e, cx) => this.control("j", cx))
-      .on_action("go-to-ctrl-p", (_e, cx) => this.control("p", cx))
-      .on_action("go-to-ctrl-k", (_e, cx) => this.control("k", cx))
+      .on_action("go-to-confirm", (_e, cx) => { cx.stop_propagation(); this.go(this.pickable()[this.at], cx, true); })
+      .on_action("go-to-next", (_e, cx) => this.listKey("next", cx))
+      .on_action("go-to-previous", (_e, cx) => this.listKey("previous", cx))
+      .on_action("go-to-close-tab", (_e, cx) => this.listKey("close-tab", cx))
+      .on_action("go-to-page-up", (_e, cx) => this.listKey("page-up", cx))
+      .on_action("go-to-page-down", (_e, cx) => this.listKey("page-down", cx))
       .w_full()
       .h(panelHeight)
       .min_h(0)
@@ -384,7 +397,7 @@ export default class Picker extends View {
       .child(div().h(16).flex_none().px(10).text_size(11).text_color(t.dim).truncate().child(this.help
         ? "Keyboard controls · Esc or q back"
         : this.typing
-          ? `${tabs} tab${tabs === 1 ? "" : "s"} · INSERT · Esc navigate · Ctrl+J/K select · Enter go`
-          : `${tabs} tab${tabs === 1 ? "" : "s"} · NORMAL · j/k move · / search · Enter/l go · ? help`));
+          ? `${tabs} tab${tabs === 1 ? "" : "s"} · INSERT · Esc navigate · Ctrl+J/K select · ${enterHint}`
+          : `${tabs} tab${tabs === 1 ? "" : "s"} · NORMAL · j/k move · / search · ${enterHint} · ? help`));
   }
 }
