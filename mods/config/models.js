@@ -32,6 +32,7 @@ import { heading, offeredAgents, waiting } from "./ui.js";
 
 const SOURCE = "https://models.dev/api.json";
 const STAMP = "models.synced";
+const CATALOG_VERSION = 3;
 const DAY = 24 * 3600_000;
 const SHOWN = 150; // rows drawn at most: search narrows the rest
 const STARRED = "models.starred";
@@ -51,7 +52,7 @@ const CATALOGS = {
   grok: { list: "grok models", providers: ["xai"] },
   cursor: { list: "cursor-agent models" },
   copilot: { providers: ["github-copilot"], families: ["claude", "gpt", "o1", "o3", "o4", "codex", "cursor"] },
-  opencode: { providers: ["anthropic", "openai"], prefixed: true },
+  opencode: { providers: ["anthropic", "openai", "opencode-go"], prefixed: true },
 };
 
 // The catalog as last read or synced, and the sync in flight: one of each for
@@ -74,7 +75,7 @@ export function star(agent, id) {
   if (next.length) all[agent] = next; else delete all[agent];
   setShared(STARRED, Object.keys(all).length ? all : null);
 }
-const stale = () => cache?.version !== 2 || !cache?.synced || !(Date.now() - Date.parse(cache.synced) < DAY);
+const stale = () => cache?.version !== CATALOG_VERSION || !cache?.synced || !(Date.now() - Date.parse(cache.synced) < DAY);
 
 export function ago(iso) {
   const min = Math.floor((Date.now() - Date.parse(iso)) / 60_000);
@@ -120,7 +121,7 @@ const own = (key, rule) => `(($own[0][${JSON.stringify(key)}] // "") | gsub(${AN
   | if length == 0 then ($old[0].agents[${JSON.stringify(key)}] // []) else . end)`;
 const FILTER = `. as $api | {${Object.entries(CATALOGS).map(([key, rule]) => `${JSON.stringify(key)}: ${rule.list ? own(key, rule) : list(rule)}`).join(", ")}} as $agents
 | if ([$agents[] | length] | add) == 0 then error("models.dev listed no models") else
-  { version: 2, synced: (now | todate), source: $source, agents: $agents } end`;
+  { version: ${CATALOG_VERSION}, synced: (now | todate), source: $source, agents: $agents } end`;
 // $1 models.json, $2 the source, $3 the jq filter. The file is replaced only by a whole new one.
 // $4: "<agent key><tab><command>" lines, the agents that list their own models:
 // each runs in a login shell, and what it prints goes to the filter as $own;
